@@ -1,0 +1,28 @@
+name: Benchmarking
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  benchmark:
+    name: Run and store benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Run benchmarks
+        run: cargo bench --bench my_benchmark
+
+      - name: Store benchmark results
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: Rust Benchmark
+          tool: "cargo"
+          output-file-path: target/criterion/report/index.html
+          # Use the commit author as the committer for the benchmark results
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          # Push the benchmark results to the gh-pages branch
+          auto-push: true
