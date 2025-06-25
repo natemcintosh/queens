@@ -2,7 +2,7 @@
 /// goes from left to right, top to bottom. If a bit is 0, that means it is "open" for
 /// placement. If it is 1, that means it is "occupied" by a queen OR is blocked by a
 /// queen.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Board(u64);
 
 use std::fmt;
@@ -31,6 +31,7 @@ impl Default for Board {
     }
 }
 
+#[derive(Debug, PartialEq)]
 pub enum BoardPlacementResult {
     /// The queen was successfully placed on the board.
     Success(Board),
@@ -517,9 +518,58 @@ mod tests {
         assert_eq!(queen_reach, want);
     }
 
-    #[rstest]
-    fn test_place_queen_invalid() {}
+    #[test]
+    fn test_place_queen_invalid() {
+        let board = Board::new();
+
+        // Test index out of bounds
+        assert_eq!(
+            board.place_queen(64, 0),
+            BoardPlacementResult::IndexOutOfBounds
+        );
+
+        // Test spot occupied
+        let board = if let BoardPlacementResult::Success(b) = board.place_queen(0, 0) {
+            b
+        } else {
+            panic!("Placing queen failed unexpectedly");
+        };
+        assert_eq!(board.place_queen(0, 0), BoardPlacementResult::SpotOccupied);
+
+        // Test not in color region
+        assert_eq!(
+            board.place_queen(1, 1 << 2),
+            BoardPlacementResult::NotInColorRegion
+        );
+    }
 
     #[rstest]
-    fn test_place_queen_valid() {}
+    #[case(vec![], 0, 0, 0b00000001_00000001_00000001_00000001_00000001_00000001_00000001_11111111, "place queen on empty board at (0,0)")]
+    #[case(vec![], 18, 0, 0b00000100_00000100_00000100_00000100_00000100_11111111_00000100_00000100, "place queen on empty board at (2,2)")]
+    #[case(vec![(0, 0)], 9, 0, 0b00000011_00000011_00000011_00000011_00000011_00000011_11111111_11111111, "place queen on board with one queen")]
+    #[case(vec![(0, 0), (9, 0)], 18, 0, 0b00000111_00000111_00000111_00000111_00000111_11111111_11111111_11111111, "place queen on board with two queens")]
+    #[case(vec![], 2, 1 << 2, 0b00000100_00000100_00000100_00000100_00000100_00000100_00000100_11111111, "place queen with simple color region")]
+    #[case(vec![], 10, (1 << 10) | (1 << 18), 0b00000100_00000100_00000100_00000100_00000100_00000100_11111111_00000100, "place queen with complex color region")]
+    fn test_place_queen_valid(
+        #[case] initial_placements: Vec<(u64, u64)>,
+        #[case] new_queen_idx: u64,
+        #[case] new_color_region: u64,
+        #[case] expected_board_val: u64,
+        #[case] _description: &str,
+    ) {
+        let mut board = Board::new();
+        for (idx, color) in initial_placements {
+            board = if let BoardPlacementResult::Success(b) = board.place_queen(idx, color) {
+                b
+            } else {
+                panic!("Failed to setup board for test");
+            };
+        }
+
+        let result = board.place_queen(new_queen_idx, new_color_region);
+        assert_eq!(
+            result,
+            BoardPlacementResult::Success(Board(expected_board_val))
+        );
+    }
 }
