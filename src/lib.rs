@@ -5,6 +5,26 @@
 #[derive(Debug, Clone, Copy)]
 pub struct Board(u64);
 
+use std::fmt;
+
+impl fmt::Display for Board {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for row in 0..8 {
+            for col in 0..8 {
+                let idx = row * 8 + col;
+                let mask = 1 << idx;
+                if self.0 & mask == 0 {
+                    write!(f, ". ")?;
+                } else {
+                    write!(f, "X ")?;
+                }
+            }
+            writeln!(f)?;
+        }
+        Ok(())
+    }
+}
+
 impl Default for Board {
     fn default() -> Self {
         Self::new()
@@ -496,4 +516,10 @@ mod tests {
         let queen_reach = board.fill_queen_reach(queen_idx, color_region);
         assert_eq!(queen_reach, want);
     }
+
+    #[rstest]
+    fn test_place_queen_invalid() {}
+
+    #[rstest]
+    fn test_place_queen_valid() {}
 }
