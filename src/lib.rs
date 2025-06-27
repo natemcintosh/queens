@@ -572,4 +572,61 @@ mod tests {
             BoardPlacementResult::Success(Board(expected_board_val))
         );
     }
+    #[test]
+    fn test_good_region_input() {
+        let string = "11233456 12234456 11233456 12273456 11233456 88885556 66888886 66666666";
+        let regions = parse_color_regions(string);
+        assert_eq!(
+            regions,
+            [
+                build_bit_set_from_inds(&[0, 1, 8, 16, 17, 24, 32, 33]),
+                build_bit_set_from_inds(&[2, 9, 10, 18, 25, 26, 34]),
+                build_bit_set_from_inds(&[3, 4, 11, 19, 20, 28, 35, 36]),
+                build_bit_set_from_inds(&[5, 12, 13, 21, 29, 37]),
+                build_bit_set_from_inds(&[6, 14, 22, 30, 38, 44, 45, 46]),
+                build_bit_set_from_inds(&[
+                    7, 15, 23, 31, 39, 47, 55, 48, 49, 56, 57, 58, 59, 60, 61, 62, 63
+                ]),
+                build_bit_set_from_inds(&[27]),
+                build_bit_set_from_inds(&[40, 41, 42, 43, 50, 51, 52, 53, 54]),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_bad_region_input() {}
+}
+
+/// Take a set of indices, and insert each into a bitset.
+fn build_bit_set_from_inds(inds: &[u64]) -> u64 {
+    // Make sure all indices are valid
+    assert!(inds.iter().all(|&idx| idx < 64));
+
+    let mut bitset = 0;
+    for &idx in inds {
+        bitset |= 1 << idx;
+    }
+    bitset
+}
+
+/// The user passes in the color regions by assigning numbers to each region.
+/// Then they enter each row, left to right, top to bottom, with a space between the
+/// rows. This function will verify that there are exactly 8 unique numbers used
+/// An example input string might look like
+/// "11233456 12234456 11233456 12273456 11233456 88885556 66888886 66666666"
+pub fn parse_color_regions(input: &str) -> [u64; 8] {
+    let mut regions = [0; 8];
+
+    for (row_idx, row) in input.split_whitespace().enumerate() {
+        for (col_idx, color) in row.chars().enumerate() {
+            let color = color.to_digit(10).expect("Could not parse into int");
+            if color > 8 {
+                panic!("Color region number must be between 1 and 8");
+            }
+            let linear_idx = (8 * row_idx) + col_idx;
+            regions[color as usize - 1] |= 1 << linear_idx;
+        }
+    }
+
+    regions
 }
