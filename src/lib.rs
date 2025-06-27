@@ -84,7 +84,43 @@ impl Board {
     fn fill_queen_reach(&self, queen_idx: u64, color_region_mask: u64) -> u64 {
         let row_mask = self.fill_row(queen_idx);
         let col_mask = self.fill_column(queen_idx);
-        row_mask | col_mask | color_region_mask
+        let diagonal_mask = self.fill_diagonals(queen_idx);
+        row_mask | col_mask | diagonal_mask | color_region_mask
+    }
+
+    /// Fills in the spots to the 4 diagonal squares of the index. If along the edges,
+    /// and no such diagonal exists on the board, skip that diagonal.
+    fn fill_diagonals(&self, queen_idx: u64) -> u64 {
+        let row = queen_idx / 8;
+        let col = queen_idx % 8;
+
+        let mut mask = 0;
+
+        // Fill in the top-left diagonal
+        if row > 0 && col > 0 {
+            // The index is up one row (-8) and left one (-1)
+            mask |= 1 << (queen_idx - 8 - 1);
+        }
+
+        // Fill in the top-right diagonal
+        if row > 0 && col < 7 {
+            // The index is up one row (-8) and right one (+1)
+            mask |= 1 << (queen_idx - 8 + 1);
+        }
+
+        // Fill in the bottom-left diagonal
+        if row < 7 && col > 0 {
+            // The index is down one row (+8) and left one (-1)
+            mask |= 1 << (queen_idx + 8 - 1);
+        }
+
+        // Fill in the bottom-right diagonal
+        if row < 7 && col < 7 {
+            // The index is down one row (+8) and right one (+1)
+            mask |= 1 << (queen_idx + 8 + 1);
+        }
+
+        mask
     }
 
     /// Fill in all of the bits that represent the row of the given spot index, where
@@ -111,6 +147,24 @@ impl Board {
 mod tests {
     use super::*;
     use rstest::rstest;
+
+    #[rstest]
+    #[case(0, build_bit_set_from_inds(&[9]))]
+    #[case(1, build_bit_set_from_inds(&[8, 10]))]
+    #[case(2, build_bit_set_from_inds(&[9, 11]))]
+    #[case(7, build_bit_set_from_inds(&[14]))]
+    #[case(8, build_bit_set_from_inds(&[1, 17]))]
+    #[case(9, build_bit_set_from_inds(&[0, 2, 16, 18]))]
+    #[case(56, build_bit_set_from_inds(&[49]))]
+    #[case(57, build_bit_set_from_inds(&[48, 50]))]
+    #[case(62, build_bit_set_from_inds(&[53, 55]))]
+    #[case(63, build_bit_set_from_inds(&[54]))]
+    #[case(28, build_bit_set_from_inds(&[19, 21, 35, 37]))]
+    fn test_fill_diagonals(#[case] queen_idx: u64, #[case] want_diags: u64) {
+        let board = Board::new();
+        let got = board.fill_diagonals(queen_idx);
+        assert_eq!(got, want_diags);
+    }
 
     #[rstest]
     #[case(0, 0b11111111)]
@@ -475,42 +529,42 @@ mod tests {
     #[case(
         0,
         0,
-        0b00000001_00000001_00000001_00000001_00000001_00000001_00000001_11111111
+        0b00000001_00000001_00000001_00000001_00000001_00000001_00000011_11111111
     )]
     #[case(
         9,
         0,
-        0b00000010_00000010_00000010_00000010_00000010_00000010_11111111_00000010
+        0b00000010_00000010_00000010_00000010_00000010_00000111_11111111_00000111
     )]
     #[case(
         18,
         0,
-        0b00000100_00000100_00000100_00000100_00000100_11111111_00000100_00000100
+        0b00000100_00000100_00000100_00000100_00001110_11111111_00001110_00000100
     )]
     #[case(
         27,
         0,
-        0b00001000_00001000_00001000_00001000_11111111_00001000_00001000_00001000
+        0b00001000_00001000_00001000_00011100_11111111_00011100_00001000_00001000
     )]
     #[case(
         36,
         0,
-        0b00010000_00010000_00010000_11111111_00010000_00010000_00010000_00010000
+        0b00010000_00010000_00111000_11111111_00111000_00010000_00010000_00010000
     )]
     #[case(
         45,
         0,
-        0b00100000_00100000_11111111_00100000_00100000_00100000_00100000_00100000
+        0b00100000_01110000_11111111_01110000_00100000_00100000_00100000_00100000
     )]
     #[case(
         54,
         0,
-        0b01000000_11111111_01000000_01000000_01000000_01000000_01000000_01000000
+        0b11100000_11111111_11100000_01000000_01000000_01000000_01000000_01000000
     )]
     #[case(
         63,
         0,
-        0b11111111_10000000_10000000_10000000_10000000_10000000_10000000_10000000
+        0b11111111_11000000_10000000_10000000_10000000_10000000_10000000_10000000
     )]
     fn test_fill_queen_reach(#[case] queen_idx: u64, #[case] color_region: u64, #[case] want: u64) {
         let board = Board(0);
@@ -544,12 +598,12 @@ mod tests {
     }
 
     #[rstest]
-    #[case(vec![], 0, 0, 0b00000001_00000001_00000001_00000001_00000001_00000001_00000001_11111111, "place queen on empty board at (0,0)")]
-    #[case(vec![], 18, 0, 0b00000100_00000100_00000100_00000100_00000100_11111111_00000100_00000100, "place queen on empty board at (2,2)")]
-    #[case(vec![(0, 0)], 9, 0, 0b00000011_00000011_00000011_00000011_00000011_00000011_11111111_11111111, "place queen on board with one queen")]
-    #[case(vec![(0, 0), (9, 0)], 18, 0, 0b00000111_00000111_00000111_00000111_00000111_11111111_11111111_11111111, "place queen on board with two queens")]
-    #[case(vec![], 2, 1 << 2, 0b00000100_00000100_00000100_00000100_00000100_00000100_00000100_11111111, "place queen with simple color region")]
-    #[case(vec![], 10, (1 << 10) | (1 << 18), 0b00000100_00000100_00000100_00000100_00000100_00000100_11111111_00000100, "place queen with complex color region")]
+    #[case(vec![], 0, 0, 0b00000001_00000001_00000001_00000001_00000001_00000001_00000011_11111111, "place queen on empty board at (0,0)")]
+    #[case(vec![], 18, 0, 0b00000100_00000100_00000100_00000100_00001110_11111111_00001110_00000100, "place queen on empty board at (2,2)")]
+    #[case(vec![(0, 0)], 10, 0, 0b00000101_00000101_00000101_00000101_00000101_00001111_11111111_11111111, "place queen on board with one queen")]
+    #[case(vec![(0, 0), (63, 0)], 18, 0, 0b11111111_11000101_10000101_10000101_10001111_11111111_10001111_11111111, "place queen on board with two queens")]
+    #[case(vec![], 2, 1 << 2, 0b00000100_00000100_00000100_00000100_00000100_00000100_00001110_11111111, "place queen with simple color region")]
+    #[case(vec![], 10, (1 << 10) | (1 << 18), 0b00000100_00000100_00000100_00000100_00000100_00001110_11111111_00001110, "place queen with complex color region")]
     fn test_place_queen_valid(
         #[case] initial_placements: Vec<(u64, u64)>,
         #[case] new_queen_idx: u64,
@@ -598,7 +652,7 @@ mod tests {
 }
 
 /// Take a set of indices, and insert each into a bitset.
-fn build_bit_set_from_inds(inds: &[u64]) -> u64 {
+pub fn build_bit_set_from_inds(inds: &[u64]) -> u64 {
     // Make sure all indices are valid
     assert!(inds.iter().all(|&idx| idx < 64));
 
