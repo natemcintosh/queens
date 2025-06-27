@@ -80,7 +80,8 @@ impl Board {
         }
     }
 
-    /// For a given queen spot, fill in all of the spots that the queen can reach
+    /// For a given queen spot, fill in all of the spots that the queen can reach:
+    /// her row, column, and diagonals.
     fn fill_queen_reach(&self, queen_idx: u64, color_region_mask: u64) -> u64 {
         let row_mask = self.fill_row(queen_idx);
         let col_mask = self.fill_column(queen_idx);
@@ -683,4 +684,39 @@ pub fn parse_color_regions(input: &str) -> [u64; 8] {
     }
 
     regions
+}
+
+/// Solve the puzzle. Prints out the solution, assuming it can find one.
+pub fn solve(color_regions: &str) {
+    // First parse the regions into 8 bitsets
+    let mut color_regions = parse_color_regions(color_regions);
+
+    // Sort the regions, from the one with the fewest spots to the most
+    color_regions.sort_by_key(|&region| region.count_ones());
+
+    // Keep track of where each queen is placed
+    let mut queen_inds: Vec<u64> = Vec::with_capacity(8);
+
+    // The main loop
+
+    // Put the indices in a single u64
+    let queens_mask = build_bit_set_from_inds(&queen_inds);
+
+    // Print it out
+    disp_u64(queens_mask);
+}
+
+fn disp_u64(board: u64) {
+    for row in 0..8 {
+        for col in 0..8 {
+            let idx = row * 8 + col;
+            let mask = 1 << idx;
+            if board & mask == 0 {
+                print!(". ");
+            } else {
+                print!("X ");
+            }
+        }
+        println!();
+    }
 }
