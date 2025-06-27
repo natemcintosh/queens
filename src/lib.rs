@@ -55,7 +55,7 @@ impl Board {
     /// placed, the board is updated by setting the bit at `queen_idx` to 1, as well as
     /// all of the bits representing the row, column, and color region that the queen is
     /// in.
-    pub fn place_queen(&self, queen_idx: u64, color_region: u64) -> BoardPlacementResult {
+    pub fn place_queen(&self, queen_idx: u64, color_region_mask: u64) -> BoardPlacementResult {
         // Make sure the index is within bounds
         if queen_idx >= 64 {
             return BoardPlacementResult::IndexOutOfBounds;
@@ -65,7 +65,7 @@ impl Board {
         let queen_only_mask = 1 << queen_idx;
 
         // Make sure the queen is in the color region
-        if color_region != 0 && color_region & queen_only_mask == 0 {
+        if color_region_mask != 0 && color_region_mask & queen_only_mask == 0 {
             return BoardPlacementResult::NotInColorRegion;
         }
 
@@ -73,7 +73,7 @@ impl Board {
             // If the spot is empty, block off all of the spots in the same row, same
             // column, and same color region.
             BoardPlacementResult::Success(Board(
-                self.0 | self.fill_queen_reach(queen_idx, color_region),
+                self.0 | self.fill_queen_reach(queen_idx, color_region_mask),
             ))
         } else {
             BoardPlacementResult::SpotOccupied
@@ -630,7 +630,7 @@ mod tests {
     #[test]
     fn test_good_region_input() {
         let string = "11233456 12234456 11233456 12273456 11233456 88885556 66888886 66666666";
-        let regions = parse_color_regions(string);
+        let regions = parse_color_region_masks(string);
         assert_eq!(
             regions,
             [
@@ -669,7 +669,7 @@ pub fn build_bit_set_from_inds(inds: &[u64]) -> u64 {
 /// rows. This function will verify that there are exactly 8 unique numbers used
 /// An example input string might look like
 /// "11233456 12234456 11233456 12273456 11233456 88885556 66888886 66666666"
-pub fn parse_color_regions(input: &str) -> [u64; 8] {
+pub fn parse_color_region_masks(input: &str) -> [u64; 8] {
     let mut regions = [0; 8];
 
     for (row_idx, row) in input.split_whitespace().enumerate() {
@@ -686,18 +686,114 @@ pub fn parse_color_regions(input: &str) -> [u64; 8] {
     regions
 }
 
-/// Solve the puzzle. Prints out the solution, assuming it can find one.
-pub fn solve(color_regions: &str) {
-    // First parse the regions into 8 bitsets
-    let mut color_regions = parse_color_regions(color_regions);
+/// The user passes in the color regions by assigning numbers to each region.
+/// Then they enter each row, left to right, top to bottom, with a space between the
+/// rows. This function will verify that there are exactly 8 unique numbers used
+/// An example input string might look like
+/// "11233456 12234456 11233456 12273456 11233456 88885556 66888886 66666666"
+pub fn parse_color_region_inds(input: &str) -> Vec<Vec<u64>> {
+    // Create 8 empty vectors to store the indices of each color region
+    let mut regions: Vec<Vec<u64>> = vec![Vec::new(); 8];
 
-    // Sort the regions, from the one with the fewest spots to the most
-    color_regions.sort_by_key(|&region| region.count_ones());
+    for (row_idx, row) in input.split_whitespace().enumerate() {
+        for (col_idx, color) in row.chars().enumerate() {
+            let color = color.to_digit(10).expect("Could not parse into int");
+            if color > 8 {
+                panic!("Color region number must be between 1 and 8");
+            }
+            let linear_idx = (8 * row_idx) + col_idx;
+            regions[color as usize - 1].push(linear_idx as u64);
+        }
+    }
+
+    regions
+}
+
+/// Solve the puzzle. Prints out the solution, assuming it can find one.
+pub fn solve(raw_color_regions: &str, max_iters: usize) {
+    // First parse the regions into a nested vec of the indices that make up this color
+    // region
+    let mut color_region_inds = parse_color_region_inds(raw_color_regions);
+
+    // Also get the bitsets that make up the color regions
+    let color_region_bitsets = parse_color_region_masks(raw_color_regions);
+
+    // Let the user know how many possible positions are being checked.
+    {
+        let possible_combos: usize = color_region_inds
+            .iter()
+            .map(|region| region.len())
+            .product();
+        // Format it with commas every 3 digits
+        let formatted_combo = possible_combos
+            .to_string()
+            .as_bytes()
+            .rchunks(3)
+            .rev()
+            .map(std::str::from_utf8)
+            .collect::<Result<Vec<&str>, _>>()
+            .unwrap()
+            .join(","); // separator
+        println!("Will search up to {formatted_combo} positions");
+    }
+
+    // Sort the regions, from the one with the fewest items to the most
+    color_region_inds.sort_by_key(|region| region.len());
+    println!("{:?}", &color_region_inds);
+
+    let mut cr_idx: usize = 0;
+
+    // Create a list of the index we are investigating for each color region
+    let mut state_inds: [usize; 8] = [0; 8];
 
     // Keep track of where each queen is placed
     let mut queen_inds: Vec<u64> = Vec::with_capacity(8);
+    let mut boards_over_time: Vec<Board> = Vec::with_capacity(8);
+
+    let mut board = Board::new();
 
     // The main loop
+    for _ in 0..max_iters {
+        // Check if we've found a solution
+        if queen_inds.len() == 8 {
+            break;
+        }
+
+        let this_queen_idx = color_region_inds[cr_idx][state_inds[cr_idx]];
+        dbg!(this_queen_idx, cr_idx);
+        // Try placing the queen
+        match board.place_queen(this_queen_idx, color_region_bitsets[cr_idx]) {
+            BoardPlacementResult::Success(b) => {
+                board = b;
+                dbg!(b);
+                queen_inds.push(this_queen_idx);
+                boards_over_time.push(board);
+
+                // Move to the next color region
+                cr_idx += 1;
+            }
+            BoardPlacementResult::SpotOccupied => {
+                // We cannot place it. Bump the current state index
+                state_inds[cr_idx] += 1;
+                // Check that we are not at the end of color region. If so, we go
+                // back one color region, and reset the state index for this color
+                // region
+                if state_inds[cr_idx] >= color_region_inds[cr_idx].len() {
+                    state_inds[cr_idx] = 0;
+                    cr_idx -= 1;
+                }
+                // If we aren't at the end of this color region yet, continue on
+            }
+            BoardPlacementResult::NotInColorRegion => {
+                // Should never happen.
+                unreachable!("Tried placing a queen outside its color region")
+            }
+            BoardPlacementResult::IndexOutOfBounds => {
+                // Should never happen.
+                unreachable!("Tried placing a queen outside the board")
+            }
+        }
+    }
 
     // Put the indices in a single u64
     let queens_mask = build_bit_set_from_inds(&queen_inds);
