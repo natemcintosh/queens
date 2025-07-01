@@ -1,5 +1,5 @@
 use clap::Parser;
-use queens::solve;
+use queens::{build_bit_set_from_inds, disp_u64, solve};
 
 #[derive(Parser)]
 #[command(about = "Solve the queens problem")]
@@ -11,16 +11,24 @@ struct Args {
     /// where number corresponds to a certain color, e.g. 1 => red, 2 => blue, etc.
     color_regions: String,
 
-    /// Maximum number of iterations to try before giving up
-    #[clap(short, long)]
-    #[arg(default_value_t = 100_000)]
-    max_iters: usize,
+    /// Whether to print out the solution in a human-readable format
+    #[arg(short, long, default_value_t = true)]
+    verbose: bool,
 }
 
 fn main() {
     // Parse command line arguments
     let args = Args::parse();
 
+    // Time how long it takes
+    let start = std::time::Instant::now();
+
     // Solve the queens problem
-    solve(&args.color_regions, args.max_iters);
+    let res = solve(&args.color_regions, args.verbose).expect("Could not find a solution");
+
+    // Print out the time it took
+    println!("Time: {:?}\n\n", start.elapsed());
+
+    // Print out the result, whatever it is
+    disp_u64(build_bit_set_from_inds(&res));
 }

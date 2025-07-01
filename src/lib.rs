@@ -7,6 +7,8 @@ pub struct Board(u64);
 
 use std::fmt;
 
+use itertools::Itertools;
+
 impl fmt::Display for Board {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for row in 0..8 {
@@ -50,6 +52,11 @@ impl Board {
         Board(0)
     }
 
+    /// Clears the board by setting all bits to 0.
+    pub fn clear(&mut self) {
+        self.0 = 0;
+    }
+
     /// If a queen can be placed at index `queen_idx` on the board, place it and return
     /// the updated board as `Some(Board)`. If not, return `None`. If the queen can be
     /// placed, the board is updated by setting the bit at `queen_idx` to 1, as well as
@@ -66,6 +73,10 @@ impl Board {
 
         // Make sure the queen is in the color region
         if color_region_mask != 0 && color_region_mask & queen_only_mask == 0 {
+            // Get color_region_mask and queen_only_mask as bit strings for better
+            // debugging
+            // println!("{color_region_mask:#064b}");
+            // println!("{queen_only_mask:#064b}");
             return BoardPlacementResult::NotInColorRegion;
         }
 
@@ -649,7 +660,34 @@ mod tests {
     }
 
     #[test]
-    fn test_bad_region_input() {}
+    fn test_regions_are_columns() {
+        // In this test, the color regions are the rows, and we test that it can
+        // successfully return any solution
+        let raw_color_regions =
+            "12345678 12345678 12345678 12345678 12345678 12345678 12345678 12345678";
+        // Make sure it returns sucess
+        let res = solve(raw_color_regions, false);
+        assert!(res.is_some());
+    }
+
+    #[test]
+    fn test_regions_are_rows() {
+        // In this test, the color regions are the rows, and we test that it can
+        // successfully return any solution
+        let raw_color_regions =
+            "11111111 22222222 33333333 44444444 55555555 66666666 77777777 88888888";
+        let res = solve(raw_color_regions, false);
+        assert!(res.is_some());
+    }
+
+    #[test]
+    fn test_actual_board() {
+        // In this test, we use an actual board
+        let raw_color_regions =
+            "11112333 11222344 11255346 77253344 73355334 77335344 87355333 77333333";
+        let res = solve(raw_color_regions, false);
+        assert!(res.is_some());
+    }
 }
 
 /// Take a set of indices, and insert each into a bitset.
@@ -709,17 +747,19 @@ pub fn parse_color_region_inds(input: &str) -> Vec<Vec<u64>> {
     regions
 }
 
-/// Solve the puzzle. Prints out the solution, assuming it can find one.
-pub fn solve(raw_color_regions: &str, max_iters: usize) {
+/// Solve the puzzle by brute force, attempting all possible combinations until one
+/// works. Return a vector of each queen's index (not a mask), or None if it failed to
+/// find a solution.
+pub fn solve(raw_color_regions: &str, verbose: bool) -> Option<Vec<u64>> {
     // First parse the regions into a nested vec of the indices that make up this color
     // region
-    let mut color_region_inds = parse_color_region_inds(raw_color_regions);
+    let color_region_inds = parse_color_region_inds(raw_color_regions);
 
     // Also get the bitsets that make up the color regions
     let color_region_bitsets = parse_color_region_masks(raw_color_regions);
 
     // Let the user know how many possible positions are being checked.
-    {
+    if verbose {
         let possible_combos: usize = color_region_inds
             .iter()
             .map(|region| region.len())
@@ -737,72 +777,49 @@ pub fn solve(raw_color_regions: &str, max_iters: usize) {
         println!("Will search up to {formatted_combo} positions");
     }
 
-    // Sort the regions, from the one with the fewest items to the most
-    color_region_inds.sort_by_key(|region| region.len());
-    println!("{:?}", &color_region_inds);
+    // A mutable board to reduce allocations
+    let mut b = Board::new();
 
-    let mut cr_idx: usize = 0;
+    for queen_placement in color_region_inds.iter().multi_cartesian_product() {
+        // Make sure the board is empty
+        b.clear();
 
-    // Create a list of the index we are investigating for each color region
-    let mut state_inds: [usize; 8] = [0; 8];
+        let mut successful_placement = true;
 
-    // Keep track of where each queen is placed
-    let mut queen_inds: Vec<u64> = Vec::with_capacity(8);
-    let mut boards_over_time: Vec<Board> = Vec::with_capacity(8);
-
-    let mut board = Board::new();
-
-    // The main loop
-    for _ in 0..max_iters {
-        // Check if we've found a solution
-        if queen_inds.len() == 8 {
-            break;
+        // Try this placement by placing one queen at a time
+        for (idx, &&queen_idx) in queen_placement.iter().enumerate() {
+            match b.place_queen(queen_idx, color_region_bitsets[idx]) {
+                BoardPlacementResult::Success(board) => {
+                    // We were able to place this queen.
+                    // Update the board with the new queen's position
+                    b = board;
+                }
+                BoardPlacementResult::SpotOccupied => {
+                    // Overlap, cannot do this spot, try next placement
+                    successful_placement = false;
+                    break;
+                }
+                BoardPlacementResult::NotInColorRegion => {
+                    unreachable!("The queen is not in the color region it shoudl be in")
+                }
+                BoardPlacementResult::IndexOutOfBounds => {
+                    unreachable!("The queen is not in the color region it shoudl be in")
+                }
+            }
         }
 
-        let this_queen_idx = color_region_inds[cr_idx][state_inds[cr_idx]];
-        dbg!(this_queen_idx, cr_idx);
-        // Try placing the queen
-        match board.place_queen(this_queen_idx, color_region_bitsets[cr_idx]) {
-            BoardPlacementResult::Success(b) => {
-                board = b;
-                dbg!(b);
-                queen_inds.push(this_queen_idx);
-                boards_over_time.push(board);
-
-                // Move to the next color region
-                cr_idx += 1;
-            }
-            BoardPlacementResult::SpotOccupied => {
-                // We cannot place it. Bump the current state index
-                state_inds[cr_idx] += 1;
-                // Check that we are not at the end of color region. If so, we go
-                // back one color region, and reset the state index for this color
-                // region
-                if state_inds[cr_idx] >= color_region_inds[cr_idx].len() {
-                    state_inds[cr_idx] = 0;
-                    cr_idx -= 1;
-                }
-                // If we aren't at the end of this color region yet, continue on
-            }
-            BoardPlacementResult::NotInColorRegion => {
-                // Should never happen.
-                unreachable!("Tried placing a queen outside its color region")
-            }
-            BoardPlacementResult::IndexOutOfBounds => {
-                // Should never happen.
-                unreachable!("Tried placing a queen outside the board")
-            }
+        if successful_placement {
+            return Some(queen_placement.iter().map(|&&q| q).collect());
         }
     }
 
-    // Put the indices in a single u64
-    let queens_mask = build_bit_set_from_inds(&queen_inds);
-
-    // Print it out
-    disp_u64(queens_mask);
+    // If we get here, we did not find a solution
+    None
 }
 
-fn disp_u64(board: u64) {
+/// Print out the state of a board by placing an 'X' wherever one of the bits in the u64
+/// is set to 1, and a '.' wherever it is set to 0.
+pub fn disp_u64(board: u64) {
     for row in 0..8 {
         for col in 0..8 {
             let idx = row * 8 + col;
