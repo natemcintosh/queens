@@ -780,11 +780,9 @@ pub fn solve(raw_color_regions: &str, verbose: bool) -> Option<Vec<u64>> {
     // A mutable board to reduce allocations
     let mut b = Board::new();
 
-    for queen_placement in color_region_inds.iter().multi_cartesian_product() {
+    'outer: for queen_placement in color_region_inds.iter().multi_cartesian_product() {
         // Make sure the board is empty
         b.clear();
-
-        let mut successful_placement = true;
 
         // Try this placement by placing one queen at a time
         for (idx, &&queen_idx) in queen_placement.iter().enumerate() {
@@ -796,8 +794,7 @@ pub fn solve(raw_color_regions: &str, verbose: bool) -> Option<Vec<u64>> {
                 }
                 BoardPlacementResult::SpotOccupied => {
                     // Overlap, cannot do this spot, try next placement
-                    successful_placement = false;
-                    break;
+                    continue 'outer;
                 }
                 BoardPlacementResult::NotInColorRegion => {
                     unreachable!("The queen is not in the color region it shoudl be in")
@@ -808,9 +805,7 @@ pub fn solve(raw_color_regions: &str, verbose: bool) -> Option<Vec<u64>> {
             }
         }
 
-        if successful_placement {
-            return Some(queen_placement.iter().map(|&&q| q).collect());
-        }
+        return Some(queen_placement.iter().map(|&&q| q).collect());
     }
 
     // If we get here, we did not find a solution
