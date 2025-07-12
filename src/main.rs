@@ -1,5 +1,5 @@
 use clap::Parser;
-use queens::{build_bit_set_from_inds, disp_u64, solve};
+use queens::{build_bit_set_from_inds, disp_u64, format_thousands, solve};
 
 #[derive(Parser)]
 #[command(about = "Solve the queens problem")]
@@ -24,11 +24,13 @@ fn main() {
     let start = std::time::Instant::now();
 
     // Solve the queens problem
-    let res = solve(&args.color_regions, args.verbose).expect("Could not find a solution");
+    let (res, n_iters) = solve(&args.color_regions, args.verbose);
+    let formatted_iters = format_thousands(n_iters);
 
     // Print out the time it took
+    println!("Positions searched: {formatted_iters}");
     println!("Time: {:?}\n\n", start.elapsed());
 
     // Print out the result, whatever it is
-    disp_u64(build_bit_set_from_inds(&res));
+    disp_u64(build_bit_set_from_inds(&res.expect("No solution found")));
 }

@@ -667,7 +667,7 @@ mod tests {
             "12345678 12345678 12345678 12345678 12345678 12345678 12345678 12345678";
         // Make sure it returns sucess
         let res = solve(raw_color_regions, false);
-        assert!(res.is_some());
+        assert!(res.0.is_some());
     }
 
     #[test]
@@ -677,7 +677,7 @@ mod tests {
         let raw_color_regions =
             "11111111 22222222 33333333 44444444 55555555 66666666 77777777 88888888";
         let res = solve(raw_color_regions, false);
-        assert!(res.is_some());
+        assert!(res.0.is_some());
     }
 
     #[test]
@@ -686,7 +686,7 @@ mod tests {
         let raw_color_regions =
             "11112333 11222344 11255346 77253344 73355334 77335344 87355333 77333333";
         let res = solve(raw_color_regions, false);
-        assert!(res.is_some());
+        assert!(res.0.is_some());
     }
 }
 
@@ -750,7 +750,7 @@ pub fn parse_color_region_inds(input: &str) -> Vec<Vec<u64>> {
 /// Solve the puzzle by brute force, attempting all possible combinations until one
 /// works. Return a vector of each queen's index (not a mask), or None if it failed to
 /// find a solution.
-pub fn solve(raw_color_regions: &str, verbose: bool) -> Option<Vec<u64>> {
+pub fn solve(raw_color_regions: &str, verbose: bool) -> (Option<Vec<u64>>, usize) {
     // First parse the regions into a nested vec of the indices that make up this color
     // region
     let color_region_inds = parse_color_region_inds(raw_color_regions);
@@ -765,22 +765,22 @@ pub fn solve(raw_color_regions: &str, verbose: bool) -> Option<Vec<u64>> {
             .map(|region| region.len())
             .product();
         // Format it with commas every 3 digits
-        let formatted_combo = possible_combos
-            .to_string()
-            .as_bytes()
-            .rchunks(3)
-            .rev()
-            .map(std::str::from_utf8)
-            .collect::<Result<Vec<&str>, _>>()
-            .unwrap()
-            .join(","); // separator
+        let formatted_combo = format_thousands(possible_combos);
         println!("Will search up to {formatted_combo} positions");
     }
 
     // A mutable board to reduce allocations
     let mut b = Board::new();
+    let mut gidx: usize = 0;
 
-    'outer: for queen_placement in color_region_inds.iter().multi_cartesian_product() {
+    'outer: for (idx, queen_placement) in color_region_inds
+        .iter()
+        .multi_cartesian_product()
+        .enumerate()
+    {
+        // Update the global index
+        gidx += 1;
+
         // Make sure the board is empty
         b.clear();
 
@@ -805,11 +805,11 @@ pub fn solve(raw_color_regions: &str, verbose: bool) -> Option<Vec<u64>> {
             }
         }
 
-        return Some(queen_placement.iter().map(|&&q| q).collect());
+        return (Some(queen_placement.iter().map(|&&q| q).collect()), idx);
     }
 
     // If we get here, we did not find a solution
-    None
+    (None, gidx)
 }
 
 /// Print out the state of a board by placing an 'X' wherever one of the bits in the u64
@@ -827,4 +827,17 @@ pub fn disp_u64(board: u64) {
         }
         println!();
     }
+}
+
+/// Format a number with commas every 3 digits
+pub fn format_thousands(n: usize) -> String {
+    // Format it with commas every 3 digits
+    n.to_string()
+        .as_bytes()
+        .rchunks(3)
+        .rev()
+        .map(std::str::from_utf8)
+        .collect::<Result<Vec<&str>, _>>()
+        .unwrap()
+        .join(",")
 }
