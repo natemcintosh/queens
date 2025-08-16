@@ -25,11 +25,12 @@ fn main() {
 
     // Solve the queens problem
     let (res, n_iters) = solve(&args.color_regions, args.verbose);
+    let run_time = start.elapsed();
     let formatted_iters = format_thousands(n_iters);
 
     // Print out the time it took
     println!("Positions searched: {formatted_iters}");
-    println!("Time: {:?}\n\n", start.elapsed());
+    println!("Time: {:?}\n\n", run_time);
 
     // Print out the result, whatever it is
     disp_u64(build_bit_set_from_inds(&res.expect("No solution found")));
