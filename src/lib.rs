@@ -1,13 +1,17 @@
+use bit_board::BitBoard;
+
+use itertools::Itertools;
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+};
+
 /// Represents an 8x8 board, where each bit in the `u64` represents one spot. Indexing
 /// goes from left to right, top to bottom. If a bit is 0, that means it is "open" for
 /// placement. If it is 1, that means it is "occupied" by a queen OR is blocked by a
 /// queen.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Board(u64);
-
-use std::fmt;
-
-use itertools::Itertools;
 
 impl fmt::Display for Board {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -36,7 +40,7 @@ impl Default for Board {
 #[derive(Debug, PartialEq)]
 pub enum BoardPlacementResult {
     /// The queen was successfully placed on the board.
-    Success(Board),
+    Success(QueenBoard),
     /// The queen was not placed because the spot was already claimed by a queen.
     SpotOccupied,
     /// The queen was not placed because it was not in the color region.
@@ -44,6 +48,60 @@ pub enum BoardPlacementResult {
     /// The queen was not placed because the index at which it was attempted to be
     /// placed was out of bounds.
     IndexOutOfBounds,
+}
+
+/// A BitBoard for playing Queens.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QueenBoard(BitBoard);
+
+impl QueenBoard {
+    /// Create a new board
+    pub fn new(n_rows: usize, n_cols: usize) -> Self {
+        QueenBoard(BitBoard::new(n_rows, n_cols))
+    }
+
+    /// Clears the board by setting all bits to 0.
+    pub fn clear(&mut self) {
+        self.0.board.fill(false);
+    }
+
+    /// Place the `value` at the linear index `index`.
+    pub fn set_linear_index(&mut self, index: usize, value: bool) {
+        self.0.board.set(index, value);
+    }
+
+    /// If a queen can be placed at index `queen_idx` on the board, place it and return
+    /// the updated board as BoardPlacementResult::Success. If not, it will return one
+    /// of the other reasons for a failure. If the queen can be placed, the board is
+    /// updated by setting the bit at `queen_idx` to 1, as well as all of the bits
+    /// representing the row, column, and color region that the queen is in.
+    pub fn place_queen(
+        &self,
+        queen_idx: usize,
+        color_region_mask: QueenBoard,
+    ) -> BoardPlacementResult {
+        // Make sure the queen is within bounds
+        if queen_idx >= self.0.n_cols * self.0.n_rows {
+            return BoardPlacementResult::IndexOutOfBounds;
+        }
+
+        // Create a QueenBoard with a single bit set at the queen_idx index
+        let queen_only_board = QueenBoard::new(self.0.n_rows, self.0.n_cols);
+
+        // Make sure the queen is within the color region
+        if !color_region_mask.0.board.not_any()
+            & (color_region_mask.0.board & queen_only_board.0.board).not_any()
+        {
+            return BoardPlacementResult::NotInColorRegion;
+        }
+
+        // Make sure the spot is not already occupied
+        if self.0.board.get(queen_idx).is_some() {
+            return BoardPlacementResult::SpotOccupied;
+        }
+
+        // Place the queen
+    }
 }
 
 impl Board {
@@ -726,25 +784,41 @@ pub fn parse_color_region_masks(input: &str) -> [u64; 8] {
 
 /// The user passes in the color regions by assigning numbers to each region.
 /// Then they enter each row, left to right, top to bottom, with a space between the
-/// rows. This function will verify that there are exactly 8 unique numbers used
-/// An example input string might look like
-/// "11233456 12234456 11233456 12273456 11233456 88885556 66888886 66666666"
+/// rows.
 pub fn parse_color_region_inds(input: &str) -> Vec<Vec<u64>> {
-    // Create 8 empty vectors to store the indices of each color region
-    let mut regions: Vec<Vec<u64>> = vec![Vec::new(); 8];
+    // How many rows does this input array have?
+    let n_rows = input.split_whitespace().count();
+    println!("Found {n_rows} rows in the input");
+
+    // How many columns does this input array have?
+    let n_cols = input.split_whitespace().next().unwrap().len();
+    println!("Found {n_cols} columns in the input");
+
+    // How many unique characters are there? Remove the whitespace, and then count how
+    // many unique characters are left
+    let n_unique_chars = input
+        .replace(" ", "")
+        .chars()
+        .collect::<HashSet<char>>()
+        .len();
+    println!("Found {n_unique_chars} unique characters in the input");
+
+    // Create a hashmap to store the indices of each color region
+    let mut regions: HashMap<char, Vec<u64>> = HashMap::new();
 
     for (row_idx, row) in input.split_whitespace().enumerate() {
-        for (col_idx, color) in row.chars().enumerate() {
-            let color = color.to_digit(10).expect("Could not parse into int");
-            if color > 8 {
-                panic!("Color region number must be between 1 and 8");
-            }
+        for (col_idx, id) in row.chars().enumerate() {
+            let region = regions.entry(id).or_default();
             let linear_idx = (8 * row_idx) + col_idx;
-            regions[color as usize - 1].push(linear_idx as u64);
+            region.push(
+                linear_idx
+                    .try_into()
+                    .expect("Could not convert usize to u64"),
+            );
         }
     }
 
-    regions
+    regions.values().cloned().collect()
 }
 
 /// Solve the puzzle by brute force, attempting all possible combinations until one
@@ -754,7 +828,6 @@ pub fn solve(raw_color_regions: &str, verbose: bool) -> (Option<Vec<u64>>, usize
     // First parse the regions into a nested vec of the indices that make up this color
     // region
     let color_region_inds = parse_color_region_inds(raw_color_regions);
-
     // Also get the bitsets that make up the color regions
     let color_region_bitsets = parse_color_region_masks(raw_color_regions);
 
