@@ -53,7 +53,7 @@ impl QueenBoard {
     pub fn place_queen(
         &self,
         queen_idx: usize,
-        color_region_mask: &QueenBoard,
+        color_region_board: &QueenBoard,
     ) -> BoardPlacementResult {
         // Make sure the queen is within bounds
         if queen_idx >= self.0.n_cols * self.0.n_rows {
@@ -65,7 +65,7 @@ impl QueenBoard {
         queen_only_board.set_linear_index(queen_idx, true);
 
         // Make sure the queen is within the color region
-        if (color_region_mask.0.and(&queen_only_board.0))
+        if (color_region_board.0.and(&queen_only_board.0))
             .expect("Boards had mismatched sizes")
             .board()
             .not_any()
@@ -74,7 +74,12 @@ impl QueenBoard {
         }
 
         // Make sure the spot is not already occupied
-        if self.0.board().get(queen_idx).is_some() {
+        if *self
+            .0
+            .board()
+            .get(queen_idx)
+            .expect("queen_idx out of bounds")
+        {
             return BoardPlacementResult::SpotOccupied;
         }
 
@@ -82,7 +87,7 @@ impl QueenBoard {
         // color region
         match self
             .0
-            .or(&self.fill_queen_reach(queen_idx, color_region_mask).0)
+            .or(&self.fill_queen_reach(queen_idx, color_region_board).0)
         {
             Ok(board) => BoardPlacementResult::Success(QueenBoard(board)),
             Err(DimensionMismatch) => BoardPlacementResult::DimensionMismatch,
@@ -370,8 +375,11 @@ mod tests {
         );
         println!("Out of bounds test passed");
 
+        // We'll need a color region with the 0 index filled
+        let mut color_region_board = QueenBoard::new(8, 8);
+        color_region_board.set_linear_index(0, true);
         // Test spot occupied by placing a queen at the 0 index
-        let board = match board.place_queen(0, &QueenBoard::new(8, 8)) {
+        let board = match board.place_queen(0, &color_region_board) {
             BoardPlacementResult::Success(b) => b,
             BoardPlacementResult::SpotOccupied => panic!("Spot was occupied"),
             BoardPlacementResult::NotInColorRegion => panic!("Spot was not in color region"),
@@ -379,7 +387,7 @@ mod tests {
             BoardPlacementResult::DimensionMismatch => panic!("Dimension mismatch"),
         };
         assert_eq!(
-            board.place_queen(0, &QueenBoard::new(8, 8)),
+            board.place_queen(0, &color_region_board),
             BoardPlacementResult::SpotOccupied
         );
         println!("Spot occupied test passed");
