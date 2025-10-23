@@ -46,7 +46,7 @@ impl QueenBoard {
     }
 
     /// If a queen can be placed at index `queen_idx` on the board, place it and return
-    /// the updated board as BoardPlacementResult::Success. If not, it will return one
+    /// the updated board as `BoardPlacementResult::Success`. If not, it will return one
     /// of the other reasons for a failure. If the queen can be placed, the board is
     /// updated by setting the bit at `queen_idx` to 1, as well as all of the bits
     /// representing the row, column, and color region that the queen is in.
@@ -240,20 +240,25 @@ mod tests {
     #[test]
     fn test_good_region_input() {
         let string = "11233456 12234456 11233456 12273456 11233456 88885556 66888886 66666666";
-        let regions = parse_color_region_masks(string);
+        let (map, n_rows, n_cols) = parse_color_region_inds(string);
+        let regions = parse_color_region_boards(&map, n_rows, n_cols);
         assert_eq!(
             regions,
             [
-                build_bit_set_from_inds(&[0, 1, 8, 16, 17, 24, 32, 33]),
-                build_bit_set_from_inds(&[2, 9, 10, 18, 25, 26, 34]),
-                build_bit_set_from_inds(&[3, 4, 11, 19, 20, 28, 35, 36]),
-                build_bit_set_from_inds(&[5, 12, 13, 21, 29, 37]),
-                build_bit_set_from_inds(&[6, 14, 22, 30, 38, 44, 45, 46]),
-                build_bit_set_from_inds(&[
-                    7, 15, 23, 31, 39, 47, 55, 48, 49, 56, 57, 58, 59, 60, 61, 62, 63
-                ]),
-                build_bit_set_from_inds(&[27]),
-                build_bit_set_from_inds(&[40, 41, 42, 43, 50, 51, 52, 53, 54]),
+                build_queen_board_from_inds(&[0, 1, 8, 16, 17, 24, 32, 33], n_rows, n_cols),
+                build_queen_board_from_inds(&[2, 9, 10, 18, 25, 26, 34], n_rows, n_cols),
+                build_queen_board_from_inds(&[3, 4, 11, 19, 20, 28, 35, 36], n_rows, n_cols),
+                build_queen_board_from_inds(&[5, 12, 13, 21, 29, 37], n_rows, n_cols),
+                build_queen_board_from_inds(&[6, 14, 22, 30, 38, 44, 45, 46], n_rows, n_cols),
+                build_queen_board_from_inds(
+                    &[
+                        7, 15, 23, 31, 39, 47, 55, 48, 49, 56, 57, 58, 59, 60, 61, 62, 63
+                    ],
+                    n_rows,
+                    n_cols
+                ),
+                build_queen_board_from_inds(&[27], n_rows, n_cols),
+                build_queen_board_from_inds(&[40, 41, 42, 43, 50, 51, 52, 53, 54], n_rows, n_cols),
             ]
         );
     }
@@ -312,32 +317,45 @@ pub fn build_bit_set_from_inds(inds: &[u64]) -> u64 {
     bitset
 }
 
-/// The user passes in the color regions by assigning numbers to each region.
-/// Then they enter each row, left to right, top to bottom, with a space between the
-/// rows. This function will verify that there are exactly 8 unique numbers used
-/// An example input string might look like
-/// "11233456 12234456 11233456 12273456 11233456 88885556 66888886 66666666"
-pub fn parse_color_region_masks(input: &str) -> [u64; 8] {
-    let mut regions = [0; 8];
+/// Take a set of indices, and insert each into a bitset.
+pub fn build_queen_board_from_inds(inds: &[u64], n_rows: usize, n_cols: usize) -> QueenBoard {
+    let mut board = QueenBoard::new(n_rows, n_cols);
+    for &spot_ind in inds {
+        board.set_linear_index(spot_ind as usize, true);
+    }
+    board
+}
 
-    for (row_idx, row) in input.split_whitespace().enumerate() {
-        for (col_idx, color) in row.chars().enumerate() {
-            let color = color.to_digit(10).expect("Could not parse into int");
-            if color > 8 {
-                panic!("Color region number must be between 1 and 8");
-            }
-            let linear_idx = (8 * row_idx) + col_idx;
-            regions[color as usize - 1] |= 1 << linear_idx;
+/// The user passes in the color regions, as a `HashMap<char, Vec<u64>>`. For each pair
+/// in the hash map, a `QueenBoard` is created.
+pub fn parse_color_region_boards(
+    input: &HashMap<char, Vec<u64>>,
+    n_rows: usize,
+    n_cols: usize,
+) -> Vec<QueenBoard> {
+    // Create the vector to hold the boards
+    let mut boards: Vec<QueenBoard> = Vec::with_capacity(input.len());
+
+    // Create the empty boards inside the vector
+    for _ in 0..input.len() {
+        boards.push(QueenBoard::new(n_rows, n_cols));
+    }
+
+    // Iterate over each of the color regions
+    for (cr_idx, inds) in input.values().enumerate() {
+        // For this color region, set the inds to true
+        for &spot_ind in inds {
+            boards[cr_idx].set_linear_index(spot_ind as usize, true);
         }
     }
 
-    regions
+    boards
 }
 
-/// The user passes in the color regions by assigning numbers to each region.
+/// The user passes in the color regions by assigning letters to each region.
 /// Then they enter each row, left to right, top to bottom, with a space between the
-/// rows.
-pub fn parse_color_region_inds(input: &str) -> Vec<Vec<u64>> {
+/// rows. This function returns the color regions as numbers for simplicity.
+pub fn parse_color_region_inds(input: &str) -> (HashMap<char, Vec<u64>>, usize, usize) {
     // How many rows does this input array have?
     let n_rows = input.split_whitespace().count();
     println!("Found {n_rows} rows in the input");
@@ -361,7 +379,7 @@ pub fn parse_color_region_inds(input: &str) -> Vec<Vec<u64>> {
     for (row_idx, row) in input.split_whitespace().enumerate() {
         for (col_idx, id) in row.chars().enumerate() {
             let region = regions.entry(id).or_default();
-            let linear_idx = (row_idx * 8) + col_idx;
+            let linear_idx = (row_idx * n_cols) + col_idx;
             region.push(
                 linear_idx
                     .try_into()
@@ -370,7 +388,7 @@ pub fn parse_color_region_inds(input: &str) -> Vec<Vec<u64>> {
         }
     }
 
-    regions.values().cloned().collect()
+    (regions, n_rows, n_cols)
 }
 
 /// Solve the puzzle by brute force, attempting all possible combinations until one
@@ -379,9 +397,13 @@ pub fn parse_color_region_inds(input: &str) -> Vec<Vec<u64>> {
 pub fn solve(raw_color_regions: &str, verbose: bool) -> (Option<Vec<u64>>, usize) {
     // First parse the regions into a nested vec of the indices that make up this color
     // region
-    let color_region_inds = parse_color_region_inds(raw_color_regions);
-    // Also get the bitsets that make up the color regions
-    let color_region_bitsets = parse_color_region_masks(raw_color_regions);
+    let (color_regions, n_rows, n_cols) = parse_color_region_inds(raw_color_regions);
+
+    // Get just the indices
+    let color_region_inds: Vec<Vec<u64>> = color_regions.values().cloned().collect();
+
+    // Create QueenBoards for each color region
+    let color_region_boards = parse_color_region_boards(&color_regions, n_rows, n_cols);
 
     // Let the user know how many possible positions are being checked.
     if verbose {
@@ -395,14 +417,10 @@ pub fn solve(raw_color_regions: &str, verbose: bool) -> (Option<Vec<u64>>, usize
     }
 
     // A mutable board to reduce allocations
-    let mut b = QueenBoard::new(8, 8);
+    let mut b = QueenBoard::new(n_rows, n_cols);
     let mut gidx: usize = 0;
 
-    'outer: for (idx, queen_placement) in color_region_inds
-        .iter()
-        .multi_cartesian_product()
-        .enumerate()
-    {
+    'outer: for queen_placement in color_region_inds.iter().multi_cartesian_product() {
         // Update the global index
         gidx += 1;
 
@@ -411,8 +429,10 @@ pub fn solve(raw_color_regions: &str, verbose: bool) -> (Option<Vec<u64>>, usize
 
         // Try this placement by placing one queen at a time
         for (idx, &&queen_idx) in queen_placement.iter().enumerate() {
-            let mut color_region = QueenBoard::new(8, 8);
-            color_region.set_linear_index(color_region_bitsets[idx] as usize, true);
+            // Grab a copy of the color region board for this queen
+            let color_region = color_region_boards[idx];
+
+            // Attempt to place the queen in the color region
             match b.place_queen(queen_idx as usize, &color_region) {
                 BoardPlacementResult::Success(board) => {
                     // We were able to place this queen.
@@ -424,10 +444,10 @@ pub fn solve(raw_color_regions: &str, verbose: bool) -> (Option<Vec<u64>>, usize
                     continue 'outer;
                 }
                 BoardPlacementResult::NotInColorRegion => {
-                    unreachable!("The queen is not in the color region it shoudl be in")
+                    unreachable!("The queen is not in the color region it should be in")
                 }
                 BoardPlacementResult::IndexOutOfBounds => {
-                    unreachable!("The queen is not in the color region it shoudl be in")
+                    unreachable!("The queen is not in the color region it should be in")
                 }
                 BoardPlacementResult::DimensionMismatch => {
                     unreachable!("Dimension mismatch")
@@ -435,7 +455,7 @@ pub fn solve(raw_color_regions: &str, verbose: bool) -> (Option<Vec<u64>>, usize
             }
         }
 
-        return (Some(queen_placement.iter().map(|&&q| q).collect()), idx);
+        return (Some(queen_placement.iter().map(|&&q| q).collect()), gidx);
     }
 
     // If we get here, we did not find a solution
