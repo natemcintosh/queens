@@ -61,7 +61,8 @@ impl QueenBoard {
         }
 
         // Create a QueenBoard with a single bit set at the queen_idx index
-        let queen_only_board = QueenBoard::new(self.0.n_rows, self.0.n_cols);
+        let mut queen_only_board = QueenBoard::new(self.0.n_rows, self.0.n_cols);
+        queen_only_board.set_linear_index(queen_idx, true);
 
         // Make sure the queen is within the color region
         if (color_region_mask.0.and(&queen_only_board.0))
