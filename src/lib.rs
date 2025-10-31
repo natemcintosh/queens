@@ -120,9 +120,6 @@ impl QueenBoard {
 
 /// Take a set of indices, and insert each into a bitset.
 pub fn build_bit_set_from_inds(inds: &[u64]) -> u64 {
-    // Make sure all indices are valid
-    assert!(inds.iter().all(|&idx| idx < 64));
-
     let mut bitset = 0;
     for &idx in inds {
         bitset |= 1 << idx;
@@ -216,7 +213,10 @@ pub fn solve(raw_color_regions: &str, verbose: bool) -> (Option<Vec<u64>>, usize
     let color_region_inds: Vec<Vec<u64>> = color_regions.values().cloned().collect();
 
     // Create QueenBoards for each color region
-    let color_region_boards = parse_color_region_boards(&color_regions, n_rows, n_cols);
+    let color_region_boards: Vec<QueenBoard> = color_region_inds
+        .iter()
+        .map(|color_region_inds| build_queen_board_from_inds(color_region_inds, n_rows, n_cols))
+        .collect();
 
     // Let the user know how many possible positions are being checked.
     if verbose {
@@ -413,7 +413,7 @@ mod tests {
         #[case] new_queen_idx: u64,
         #[case] new_color_region: u64,
         #[case] expected_board_val: u64,
-        #[case] _description: &str,
+        #[case] description: &str,
     ) {
         let mut board = QueenBoard::new(8, 8);
         for (idx, color) in initial_placements {
@@ -433,8 +433,14 @@ mod tests {
         let result = board.place_queen(new_queen_idx as usize, &color_region);
         let mut expected_board = QueenBoard::new(8, 8);
         expected_board.set_linear_index(expected_board_val as usize, true);
-        assert_eq!(result, BoardPlacementResult::Success(expected_board));
+        assert_eq!(
+            result,
+            BoardPlacementResult::Success(expected_board),
+            "{}",
+            description
+        );
     }
+
     #[test]
     fn test_good_region_input() {
         let string = "11233456 12234456 11233456 12273456 11233456 88885556 66888886 66666666";
