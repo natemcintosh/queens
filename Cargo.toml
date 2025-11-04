@@ -3,6 +3,9 @@ name = "queens"
 version = "0.1.0"
 edition = "2024"
 
+[profile.release]
+lto = true
+
 [dependencies]
 bit-board = "0.4.2"
 bitvec = "1.0.1"

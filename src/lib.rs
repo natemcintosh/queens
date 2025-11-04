@@ -19,13 +19,14 @@ pub enum BoardPlacementResult {
     DimensionMismatch,
 }
 
-/// A BitBoard for playing Queens. Assumes boards are not larger than 192
+/// A `BitBoard` for playing Queens. Assumes boards are not larger than 192
 /// positions (64 * 3).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct QueenBoard(BitBoardStatic<3>);
 
 impl QueenBoard {
     /// Create a new board
+    #[must_use]
     pub fn new(n_rows: usize, n_cols: usize) -> Self {
         QueenBoard(BitBoardStatic::new(n_rows, n_cols))
     }
@@ -50,6 +51,7 @@ impl QueenBoard {
     /// of the other reasons for a failure. If the queen can be placed, the board is
     /// updated by setting the bit at `queen_idx` to 1, as well as all of the bits
     /// representing the row, column, and color region that the queen is in.
+    #[must_use]
     pub fn place_queen(
         &self,
         queen_idx: usize,
@@ -95,6 +97,7 @@ impl QueenBoard {
     }
 
     /// Fill the color region, the row, the column, and the immediate diagonals.
+    #[must_use]
     pub fn fill_queen_reach(&self, queen_idx: usize, color_region_mask: &QueenBoard) -> QueenBoard {
         let (row, col) = self.0.row_col_of(queen_idx);
 
@@ -118,18 +121,16 @@ impl QueenBoard {
     }
 
     /// Check that none of the spots in the one away diagonals are set
+    #[must_use]
     pub fn one_off_diagonals_are_empty(&self, linear_idx: usize) -> bool {
         // First get the row and column of this `linear_idx`
         let (row, col) = self.0.row_col_of(linear_idx);
-        dbg!(row);
-        dbg!(col);
 
         // Then get the spots above left, above right, below left, below right
         // assuming there is such a spot on the board
 
         // Above left
         if (row > 0) && (col > 0) {
-            println!("Checking above left");
             if self.0.get(row - 1, col - 1) {
                 return false;
             }
@@ -137,7 +138,6 @@ impl QueenBoard {
 
         // Above right
         if (row > 0) && (col < self.0.n_cols() - 1) {
-            println!("Checking above right");
             if self.0.get(row - 1, col + 1) {
                 return false;
             }
@@ -145,7 +145,6 @@ impl QueenBoard {
 
         // Below left
         if (row < self.0.n_rows() - 1) && (col > 0) {
-            println!("Checking below left");
             if self.0.get(row + 1, col - 1) {
                 return false;
             }
@@ -153,7 +152,6 @@ impl QueenBoard {
 
         // Below right
         if (row < self.0.n_rows() - 1) && (col < self.0.n_cols() - 1) {
-            println!("Checking below right");
             if self.0.get(row + 1, col + 1) {
                 return false;
             }
@@ -163,6 +161,7 @@ impl QueenBoard {
     }
 
     /// Check that this row is empty
+    #[must_use]
     pub fn row_is_empty(&self, row: usize) -> bool {
         // Use the bitboard's method to inspect each item in the row.
         // Come here and use the underlying bitvec get() method over
@@ -171,13 +170,15 @@ impl QueenBoard {
     }
 
     /// Check that this column is empty
+    #[must_use]
     pub fn col_is_empty(&self, col: usize) -> bool {
         self.0.get_col(col).all(|item| !item)
     }
 }
 
 /// Take a set of indices, and insert each into a bitset.
-pub fn build_bit_set_from_inds(inds: &[u64]) -> u64 {
+#[must_use]
+pub fn build_bit_set_from_inds(inds: &[usize]) -> u64 {
     let mut bitset = 0;
     for &idx in inds {
         bitset |= 1 << idx;
@@ -186,16 +187,18 @@ pub fn build_bit_set_from_inds(inds: &[u64]) -> u64 {
 }
 
 /// Take a set of indices, and insert each into a bitset.
-pub fn build_queen_board_from_inds(inds: &[u64], n_rows: usize, n_cols: usize) -> QueenBoard {
+#[must_use]
+pub fn build_queen_board_from_inds(inds: &[usize], n_rows: usize, n_cols: usize) -> QueenBoard {
     let mut board = QueenBoard::new(n_rows, n_cols);
     for &spot_ind in inds {
-        board.set_linear_index(spot_ind as usize, true);
+        board.set_linear_index(spot_ind, true);
     }
     board
 }
 
 /// The user passes in the color regions, as a `HashMap<char, Vec<u64>>`. For each pair
 /// in the hash map, a `QueenBoard` is created.
+#[must_use]
 pub fn parse_color_region_boards(
     input: &HashMap<char, Vec<u64>>,
     n_rows: usize,
@@ -223,7 +226,7 @@ pub fn parse_color_region_boards(
 /// The user passes in the color regions by assigning letters to each region.
 /// Then they enter each row, left to right, top to bottom, with a space between the
 /// rows. This function returns the color regions as numbers for simplicity.
-pub fn parse_color_region_inds(input: &str) -> (HashMap<char, Vec<u64>>, usize, usize) {
+pub fn parse_color_region_inds(input: &str) -> (HashMap<char, Vec<usize>>, usize, usize) {
     // How many rows does this input array have?
     let n_rows = input.split_whitespace().count();
     // println!("Found {n_rows} rows in the input");
@@ -242,17 +245,13 @@ pub fn parse_color_region_inds(input: &str) -> (HashMap<char, Vec<u64>>, usize, 
     // println!("Found {n_unique_chars} unique characters in the input");
 
     // Create a hashmap to store the indices of each color region
-    let mut regions: HashMap<char, Vec<u64>> = HashMap::new();
+    let mut regions: HashMap<char, Vec<usize>> = HashMap::new();
 
     for (row_idx, row) in input.split_whitespace().enumerate() {
         for (col_idx, id) in row.chars().enumerate() {
             let region = regions.entry(id).or_default();
             let linear_idx = (row_idx * n_cols) + col_idx;
-            region.push(
-                linear_idx
-                    .try_into()
-                    .expect("Could not convert usize to u64"),
-            );
+            region.push(linear_idx);
         }
     }
 
@@ -262,19 +261,13 @@ pub fn parse_color_region_inds(input: &str) -> (HashMap<char, Vec<u64>>, usize, 
 /// Solve the puzzle by brute force, attempting all possible combinations until one
 /// works. Return a vector of each queen's index (not a mask), or None if it failed to
 /// find a solution.
-pub fn solve(raw_color_regions: &str, verbose: bool) -> (Option<Vec<u64>>, usize) {
+pub fn solve(raw_color_regions: &str, verbose: bool) -> (Option<Vec<usize>>, usize) {
     // First parse the regions into a nested vec of the indices that make up this color
     // region
     let (color_regions, n_rows, n_cols) = parse_color_region_inds(raw_color_regions);
 
     // Get just the indices
-    let color_region_inds: Vec<Vec<u64>> = color_regions.values().cloned().collect();
-
-    // Create QueenBoards for each color region
-    let color_region_boards: Vec<QueenBoard> = color_region_inds
-        .iter()
-        .map(|color_region_inds| build_queen_board_from_inds(color_region_inds, n_rows, n_cols))
-        .collect();
+    let color_region_inds: Vec<Vec<usize>> = color_regions.values().cloned().collect();
 
     // Let the user know how many possible positions are being checked.
     if verbose {
@@ -298,34 +291,37 @@ pub fn solve(raw_color_regions: &str, verbose: bool) -> (Option<Vec<u64>>, usize
         // Make sure the board is empty
         b.clear();
 
-        // Try this placement by placing one queen at a time
-        for (idx, &&queen_idx) in queen_placement.iter().enumerate() {
-            // Grab a copy of the color region board for this queen
-            let color_region = color_region_boards[idx];
+        // Add the queens of this `queen_placement` to the board
+        for queen_idx in &queen_placement {
+            b.set_linear_index(**queen_idx, true);
+        }
 
-            // Attempt to place the queen in the color region
-            match b.place_queen(queen_idx as usize, &color_region) {
-                BoardPlacementResult::Success(board) => {
-                    // We were able to place this queen.
-                    // Update the board with the new queen's position
-                    b = board;
-                }
-                BoardPlacementResult::SpotOccupied => {
-                    // Overlap, cannot do this spot, try next placement
-                    continue 'outer;
-                }
-                BoardPlacementResult::NotInColorRegion => {
-                    unreachable!("The queen is not in the color region it should be in")
-                }
-                BoardPlacementResult::IndexOutOfBounds => {
-                    unreachable!("The queen is not in the color region it should be in")
-                }
-                BoardPlacementResult::DimensionMismatch => {
-                    unreachable!("Dimension mismatch")
-                }
+        // For each queen, check that no other queen is in its
+        // row, column, or one-away diagonals.
+        for queen_idx in &queen_placement {
+            // If there is a queen in one of the diagonal spots, continue
+            // to the next set of placements
+            if !b.one_off_diagonals_are_empty(**queen_idx) {
+                continue 'outer;
+            }
+
+            // Get the row and column for this spot
+            let (row, col) = b.0.row_col_of(**queen_idx);
+
+            // If there is a queen in this row, continue to the next set of
+            // placements
+            if !b.row_is_empty(row) {
+                continue 'outer;
+            }
+
+            // If there is a queen in this column, continue to the next
+            // set of placements
+            if !b.col_is_empty(col) {
+                continue 'outer;
             }
         }
 
+        // If we made it this far, then this is a valid set of placements
         return (Some(queen_placement.iter().map(|&&q| q).collect()), gidx);
     }
 
@@ -564,7 +560,7 @@ mod tests {
     #[case(9, &[0, 1], true, "place to check is off the board")]
     fn test_one_off_diagonals_are_empty(
         #[case] idx: u64,
-        #[case] initial_placements: &[u64],
+        #[case] initial_placements: &[usize],
         #[case] expected: bool,
         #[case] description: &str,
     ) {
@@ -590,7 +586,7 @@ mod tests {
     #[case(1, &[3], false, "row is not empty")]
     fn test_row_is_empty(
         #[case] row: usize,
-        #[case] initial_placements: &[u64],
+        #[case] initial_placements: &[usize],
         #[case] expected: bool,
         #[case] description: &str,
     ) {
@@ -611,7 +607,7 @@ mod tests {
     #[case(1, &[3], false, "col is not empty")]
     fn test_col_is_empty(
         #[case] col: usize,
-        #[case] initial_placements: &[u64],
+        #[case] initial_placements: &[usize],
         #[case] expected: bool,
         #[case] description: &str,
     ) {
