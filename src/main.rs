@@ -1,5 +1,5 @@
 use clap::Parser;
-use queens::{build_bit_set_from_inds, disp_u64, format_thousands, solve};
+use queens::{format_thousands, solve};
 
 #[derive(Parser)]
 #[command(about = "Solve the queens problem")]
@@ -30,8 +30,11 @@ fn main() {
 
     // Print out the time it took
     println!("Positions searched: {formatted_iters}");
-    println!("Time: {:?}\n\n", run_time);
+    println!("Time: {run_time:?}\n\n");
 
     // Print out the result, whatever it is
-    disp_u64(build_bit_set_from_inds(&res.expect("No solution found")));
+    match res {
+        Some(board) => println!("{}", board),
+        None => println!("No solution found"),
+    }
 }
