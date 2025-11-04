@@ -4,6 +4,12 @@ This repository contains a Rust project designed to brute-force solve the Linked
 
 The LinkedIn Queens game is a puzzle where you must place queens on a chessboard-like grid. The catch is that the board is divided into colored regions, and you must place exactly one queen in each of the regions. Like in chess, no two queens can attack each other, meaning they cannot share the same row or column.
 
+## Solve method
+The solver 
+1. Takes in the color regions
+2. Uses itertools' [multi_cartesian_product](https://docs.rs/itertools/latest/itertools/structs/struct.MultiProduct.html) to iterate over possible placements of the queens in their respective color regions.
+3. Brute forces through all the sets of possible placements until it finds the first working placement.
+
 
 ## Running
 1. Clone the repo
