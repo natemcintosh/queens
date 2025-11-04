@@ -36,11 +36,11 @@ impl fmt::Display for QueenBoard {
 
         for row in 0..self.0.n_rows() {
             // row index, right-aligned to 2 spaces
-            write!(f, "{:>2} ", row)?;
+            write!(f, "{row:>2} ")?;
             for col in 0..self.0.n_cols() {
                 let bit = self.0.get(row, col);
                 let c = if bit { 'X' } else { '.' };
-                write!(f, "{}", c)?;
+                write!(f, "{c}")?;
             }
             writeln!(f)?;
         }

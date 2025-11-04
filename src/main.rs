@@ -27,14 +27,16 @@ fn main() {
     let (res, n_iters) = solve(&args.color_regions, args.verbose);
     let run_time = start.elapsed();
     let formatted_iters = format_thousands(n_iters);
+    let iter_per_second = (n_iters as f64) / run_time.as_secs_f64();
 
     // Print out the time it took
     println!("Positions searched: {formatted_iters}");
-    println!("Time: {run_time:?}\n\n");
+    println!("Time: {run_time:?}");
+    println!("Iterations per second: {iter_per_second}\n\n");
 
     // Print out the result, whatever it is
     match res {
-        Some(board) => println!("{}", board),
+        Some(board) => println!("{board}"),
         None => println!("No solution found"),
     }
 }
