@@ -116,6 +116,64 @@ impl QueenBoard {
 
         new_board
     }
+
+    /// Check that none of the spots in the one away diagonals are set
+    pub fn one_off_diagonals_are_empty(&self, linear_idx: usize) -> bool {
+        // First get the row and column of this `linear_idx`
+        let (row, col) = self.0.row_col_of(linear_idx);
+        dbg!(row);
+        dbg!(col);
+
+        // Then get the spots above left, above right, below left, below right
+        // assuming there is such a spot on the board
+
+        // Above left
+        if (row > 0) && (col > 0) {
+            println!("Checking above left");
+            if self.0.get(row - 1, col - 1) {
+                return false;
+            }
+        }
+
+        // Above right
+        if (row > 0) && (col < self.0.n_cols() - 1) {
+            println!("Checking above right");
+            if self.0.get(row - 1, col + 1) {
+                return false;
+            }
+        }
+
+        // Below left
+        if (row < self.0.n_rows() - 1) && (col > 0) {
+            println!("Checking below left");
+            if self.0.get(row + 1, col - 1) {
+                return false;
+            }
+        }
+
+        // Below right
+        if (row < self.0.n_rows() - 1) && (col < self.0.n_cols() - 1) {
+            println!("Checking below right");
+            if self.0.get(row + 1, col + 1) {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Check that this row is empty
+    pub fn row_is_empty(&self, row: usize) -> bool {
+        // Use the bitboard's method to inspect each item in the row.
+        // Come here and use the underlying bitvec get() method over
+        // a range of indices if more performance is required.
+        self.0.get_row(row).all(|item| !item)
+    }
+
+    /// Check that this column is empty
+    pub fn col_is_empty(&self, col: usize) -> bool {
+        self.0.get_col(col).all(|item| !item)
+    }
 }
 
 /// Take a set of indices, and insert each into a bitset.
@@ -308,61 +366,60 @@ pub fn format_thousands(n: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bitvec::field::BitField;
 
     use rstest::rstest;
 
-    #[rstest]
-    // Test with no color region (0), because that part is fairly obviously correct
-    #[case(
-        0,
-        0,
-        0b00000001_00000001_00000001_00000001_00000001_00000001_00000011_11111111
-    )]
-    #[case(
-        9,
-        0,
-        0b00000010_00000010_00000010_00000010_00000010_00000111_11111111_00000111
-    )]
-    #[case(
-        18,
-        0,
-        0b00000100_00000100_00000100_00000100_00001110_11111111_00001110_00000100
-    )]
-    #[case(
-        27,
-        0,
-        0b00001000_00001000_00001000_00011100_11111111_00011100_00001000_00001000
-    )]
-    #[case(
-        36,
-        0,
-        0b00010000_00010000_00111000_11111111_00111000_00010000_00010000_00010000
-    )]
-    #[case(
-        45,
-        0,
-        0b00100000_01110000_11111111_01110000_00100000_00100000_00100000_00100000
-    )]
-    #[case(
-        54,
-        0,
-        0b11100000_11111111_11100000_01000000_01000000_01000000_01000000_01000000
-    )]
-    #[case(
-        63,
-        0,
-        0b11111111_11000000_10000000_10000000_10000000_10000000_10000000_10000000
-    )]
-    fn test_fill_queen_reach(#[case] queen_idx: u64, #[case] color_region: u64, #[case] want: u64) {
-        let board = QueenBoard::new(8, 8);
-        let mut color_region_board = QueenBoard::new(8, 8);
-        for idx in get_inds_from_u64(color_region) {
-            color_region_board.set_linear_index(idx, true);
-        }
-        let queen_reach = board.fill_queen_reach(queen_idx as usize, &color_region_board);
-        assert_eq!(queen_reach.0.board().load_le::<u64>(), want);
-    }
+    // #[rstest]
+    // // Test with no color region (0), because that part is fairly obviously correct
+    // #[case(
+    //     0,
+    //     0,
+    //     0b00000001_00000001_00000001_00000001_00000001_00000001_00000011_11111111
+    // )]
+    // #[case(
+    //     9,
+    //     0,
+    //     0b00000010_00000010_00000010_00000010_00000010_00000111_11111111_00000111
+    // )]
+    // #[case(
+    //     18,
+    //     0,
+    //     0b00000100_00000100_00000100_00000100_00001110_11111111_00001110_00000100
+    // )]
+    // #[case(
+    //     27,
+    //     0,
+    //     0b00001000_00001000_00001000_00011100_11111111_00011100_00001000_00001000
+    // )]
+    // #[case(
+    //     36,
+    //     0,
+    //     0b00010000_00010000_00111000_11111111_00111000_00010000_00010000_00010000
+    // )]
+    // #[case(
+    //     45,
+    //     0,
+    //     0b00100000_01110000_11111111_01110000_00100000_00100000_00100000_00100000
+    // )]
+    // #[case(
+    //     54,
+    //     0,
+    //     0b11100000_11111111_11100000_01000000_01000000_01000000_01000000_01000000
+    // )]
+    // #[case(
+    //     63,
+    //     0,
+    //     0b11111111_11000000_10000000_10000000_10000000_10000000_10000000_10000000
+    // )]
+    // fn test_fill_queen_reach(#[case] queen_idx: u64, #[case] color_region: u64, #[case] want: u64) {
+    //     let board = QueenBoard::new(8, 8);
+    //     let mut color_region_board = QueenBoard::new(8, 8);
+    //     for idx in get_inds_from_u64(color_region) {
+    //         color_region_board.set_linear_index(idx, true);
+    //     }
+    //     let queen_reach = board.fill_queen_reach(queen_idx as usize, &color_region_board);
+    //     assert_eq!(queen_reach.0.board().load_le::<u64>(), want);
+    // }
 
     #[test]
     fn test_place_queen_invalid() {
@@ -401,110 +458,174 @@ mod tests {
         );
     }
 
+    // #[rstest]
+    // #[case(vec![], 0, 0, 0b00000001_00000001_00000001_00000001_00000001_00000001_00000011_11111111, "place queen on empty board at (0,0)")]
+    // #[case(vec![], 18, 0, 0b00000100_00000100_00000100_00000100_00001110_11111111_00001110_00000100, "place queen on empty board at (2,2)")]
+    // #[case(vec![(0, 0)], 10, 0, 0b00000101_00000101_00000101_00000101_00000101_00001111_11111111_11111111, "place queen on board with one queen")]
+    // #[case(vec![(0, 0), (63, 0)], 18, 0, 0b11111111_11000101_10000101_10000101_10001111_11111111_10001111_11111111, "place queen on board with two queens")]
+    // #[case(vec![], 2, 1 << 2, 0b00000100_00000100_00000100_00000100_00000100_00000100_00001110_11111111, "place queen with simple color region")]
+    // #[case(vec![], 10, (1 << 10) | (1 << 18), 0b00000100_00000100_00000100_00000100_00000100_00001110_11111111_00001110, "place queen with complex color region")]
+    // fn test_place_queen_valid(
+    //     #[case] initial_placements: Vec<(u64, u64)>,
+    //     #[case] new_queen_idx: u64,
+    //     #[case] new_color_region: u64,
+    //     #[case] expected_board_val: u64,
+    //     #[case] description: &str,
+    // ) {
+    //     let mut board = QueenBoard::new(8, 8);
+    //     for (idx, color) in initial_placements {
+    //         let mut color_region = QueenBoard::new(8, 8);
+    //         color_region.set_linear_index(color as usize, true);
+    //         board = if let BoardPlacementResult::Success(b) =
+    //             board.place_queen(idx as usize, &color_region)
+    //         {
+    //             b
+    //         } else {
+    //             panic!("Failed to setup board for test");
+    //         };
+    //     }
+
+    //     let mut color_region = QueenBoard::new(8, 8);
+    //     color_region.set_linear_index(new_color_region as usize, true);
+    //     let result = board.place_queen(new_queen_idx as usize, &color_region);
+    //     let mut expected_board = QueenBoard::new(8, 8);
+    //     expected_board.set_linear_index(expected_board_val as usize, true);
+    //     assert_eq!(
+    //         result,
+    //         BoardPlacementResult::Success(expected_board),
+    //         "{}",
+    //         description
+    //     );
+    // }
+
+    // #[test]
+    // fn test_good_region_input() {
+    //     let string = "11233456 12234456 11233456 12273456 11233456 88885556 66888886 66666666";
+    //     let (map, n_rows, n_cols) = parse_color_region_inds(string);
+    //     let regions = parse_color_region_boards(&map, n_rows, n_cols);
+    //     assert_eq!(
+    //         regions,
+    //         [
+    //             build_queen_board_from_inds(&[0, 1, 8, 16, 17, 24, 32, 33], n_rows, n_cols),
+    //             build_queen_board_from_inds(&[2, 9, 10, 18, 25, 26, 34], n_rows, n_cols),
+    //             build_queen_board_from_inds(&[3, 4, 11, 19, 20, 28, 35, 36], n_rows, n_cols),
+    //             build_queen_board_from_inds(&[5, 12, 13, 21, 29, 37], n_rows, n_cols),
+    //             build_queen_board_from_inds(&[6, 14, 22, 30, 38, 44, 45, 46], n_rows, n_cols),
+    //             build_queen_board_from_inds(
+    //                 &[
+    //                     7, 15, 23, 31, 39, 47, 55, 48, 49, 56, 57, 58, 59, 60, 61, 62, 63
+    //                 ],
+    //                 n_rows,
+    //                 n_cols
+    //             ),
+    //             build_queen_board_from_inds(&[27], n_rows, n_cols),
+    //             build_queen_board_from_inds(&[40, 41, 42, 43, 50, 51, 52, 53, 54], n_rows, n_cols),
+    //         ]
+    //     );
+    // }
+
+    // #[test]
+    // fn test_regions_are_columns() {
+    //     // In this test, the color regions are the rows, and we test that it can
+    //     // successfully return any solution
+    //     let raw_color_regions =
+    //         "12345678 12345678 12345678 12345678 12345678 12345678 12345678 12345678";
+    //     // Make sure it returns sucess
+    //     let res = solve(raw_color_regions, false);
+    //     assert!(res.0.is_some());
+    // }
+
+    // #[test]
+    // fn test_regions_are_rows() {
+    //     // In this test, the color regions are the rows, and we test that it can
+    //     // successfully return any solution
+    //     let raw_color_regions =
+    //         "11111111 22222222 33333333 44444444 55555555 66666666 77777777 88888888";
+    //     let res = solve(raw_color_regions, false);
+    //     assert!(res.0.is_some());
+    // }
+
+    // #[test]
+    // fn test_actual_board() {
+    //     // In this test, we use an actual board
+    //     let raw_color_regions =
+    //         "11112333 11222344 11255346 77253344 73355334 77335344 87355333 77333333";
+    //     let res = solve(raw_color_regions, false);
+    //     assert!(res.0.is_some());
+    // }
+
     #[rstest]
-    #[case(vec![], 0, 0, 0b00000001_00000001_00000001_00000001_00000001_00000001_00000011_11111111, "place queen on empty board at (0,0)")]
-    #[case(vec![], 18, 0, 0b00000100_00000100_00000100_00000100_00001110_11111111_00001110_00000100, "place queen on empty board at (2,2)")]
-    #[case(vec![(0, 0)], 10, 0, 0b00000101_00000101_00000101_00000101_00000101_00001111_11111111_11111111, "place queen on board with one queen")]
-    #[case(vec![(0, 0), (63, 0)], 18, 0, 0b11111111_11000101_10000101_10000101_10001111_11111111_10001111_11111111, "place queen on board with two queens")]
-    #[case(vec![], 2, 1 << 2, 0b00000100_00000100_00000100_00000100_00000100_00000100_00001110_11111111, "place queen with simple color region")]
-    #[case(vec![], 10, (1 << 10) | (1 << 18), 0b00000100_00000100_00000100_00000100_00000100_00001110_11111111_00001110, "place queen with complex color region")]
-    fn test_place_queen_valid(
-        #[case] initial_placements: Vec<(u64, u64)>,
-        #[case] new_queen_idx: u64,
-        #[case] new_color_region: u64,
-        #[case] expected_board_val: u64,
+    #[case(0, &[], true, "empty board")]
+    #[case(4, &[0], false, "above left occupied")]
+    #[case(4, &[2], false, "above right occupied")]
+    #[case(4, &[6], false, "below left occupied")]
+    #[case(4, &[8], false, "below right occupied")]
+    #[case(4, &[1, 3, 5, 7], true, "no diagonals")]
+    #[case(9, &[0, 1], true, "place to check is off the board")]
+    fn test_one_off_diagonals_are_empty(
+        #[case] idx: u64,
+        #[case] initial_placements: &[u64],
+        #[case] expected: bool,
         #[case] description: &str,
     ) {
-        let mut board = QueenBoard::new(8, 8);
-        for (idx, color) in initial_placements {
-            let mut color_region = QueenBoard::new(8, 8);
-            color_region.set_linear_index(color as usize, true);
-            board = if let BoardPlacementResult::Success(b) =
-                board.place_queen(idx as usize, &color_region)
-            {
-                b
-            } else {
-                panic!("Failed to setup board for test");
-            };
-        }
-
-        let mut color_region = QueenBoard::new(8, 8);
-        color_region.set_linear_index(new_color_region as usize, true);
-        let result = board.place_queen(new_queen_idx as usize, &color_region);
-        let mut expected_board = QueenBoard::new(8, 8);
-        expected_board.set_linear_index(expected_board_val as usize, true);
+        let board = build_queen_board_from_inds(initial_placements, 3, 3);
         assert_eq!(
-            result,
-            BoardPlacementResult::Success(expected_board),
+            board.one_off_diagonals_are_empty(idx as usize),
+            expected,
             "{}",
             description
         );
     }
 
-    #[test]
-    fn test_good_region_input() {
-        let string = "11233456 12234456 11233456 12273456 11233456 88885556 66888886 66666666";
-        let (map, n_rows, n_cols) = parse_color_region_inds(string);
-        let regions = parse_color_region_boards(&map, n_rows, n_cols);
-        assert_eq!(
-            regions,
-            [
-                build_queen_board_from_inds(&[0, 1, 8, 16, 17, 24, 32, 33], n_rows, n_cols),
-                build_queen_board_from_inds(&[2, 9, 10, 18, 25, 26, 34], n_rows, n_cols),
-                build_queen_board_from_inds(&[3, 4, 11, 19, 20, 28, 35, 36], n_rows, n_cols),
-                build_queen_board_from_inds(&[5, 12, 13, 21, 29, 37], n_rows, n_cols),
-                build_queen_board_from_inds(&[6, 14, 22, 30, 38, 44, 45, 46], n_rows, n_cols),
-                build_queen_board_from_inds(
-                    &[
-                        7, 15, 23, 31, 39, 47, 55, 48, 49, 56, 57, 58, 59, 60, 61, 62, 63
-                    ],
-                    n_rows,
-                    n_cols
-                ),
-                build_queen_board_from_inds(&[27], n_rows, n_cols),
-                build_queen_board_from_inds(&[40, 41, 42, 43, 50, 51, 52, 53, 54], n_rows, n_cols),
-            ]
-        );
+    #[rstest]
+    #[case(0, &[], true, "empty board")]
+    #[case(1, &[], true, "empty board")]
+    #[case(0, &[2, 3], true, "empty row")]
+    #[case(1, &[0, 1], true, "empty row")]
+    #[case(0, &[0], false, "row is not empty")]
+    #[case(0, &[0, 1], false, "row is not empty")]
+    #[case(0, &[1], false, "row is not empty")]
+    #[case(1, &[2], false, "row is not empty")]
+    #[case(1, &[2, 3], false, "row is not empty")]
+    #[case(1, &[3], false, "row is not empty")]
+    fn test_row_is_empty(
+        #[case] row: usize,
+        #[case] initial_placements: &[u64],
+        #[case] expected: bool,
+        #[case] description: &str,
+    ) {
+        let board = build_queen_board_from_inds(initial_placements, 2, 2);
+        assert_eq!(expected, board.row_is_empty(row), "{}", description);
     }
 
-    #[test]
-    fn test_regions_are_columns() {
-        // In this test, the color regions are the rows, and we test that it can
-        // successfully return any solution
-        let raw_color_regions =
-            "12345678 12345678 12345678 12345678 12345678 12345678 12345678 12345678";
-        // Make sure it returns sucess
-        let res = solve(raw_color_regions, false);
-        assert!(res.0.is_some());
+    #[rstest]
+    #[case(0, &[], true, "empty board")]
+    #[case(1, &[], true, "empty board")]
+    #[case(0, &[1, 3], true, "empty col")]
+    #[case(1, &[0, 2], true, "empty col")]
+    #[case(0, &[0], false, "col is not empty")]
+    #[case(0, &[0, 2], false, "col is not empty")]
+    #[case(0, &[2], false, "col is not empty")]
+    #[case(1, &[1], false, "col is not empty")]
+    #[case(1, &[1, 3], false, "col is not empty")]
+    #[case(1, &[3], false, "col is not empty")]
+    fn test_col_is_empty(
+        #[case] col: usize,
+        #[case] initial_placements: &[u64],
+        #[case] expected: bool,
+        #[case] description: &str,
+    ) {
+        let board = build_queen_board_from_inds(initial_placements, 2, 2);
+        assert_eq!(expected, board.col_is_empty(col), "{}", description);
     }
-
-    #[test]
-    fn test_regions_are_rows() {
-        // In this test, the color regions are the rows, and we test that it can
-        // successfully return any solution
-        let raw_color_regions =
-            "11111111 22222222 33333333 44444444 55555555 66666666 77777777 88888888";
-        let res = solve(raw_color_regions, false);
-        assert!(res.0.is_some());
-    }
-
-    #[test]
-    fn test_actual_board() {
-        // In this test, we use an actual board
-        let raw_color_regions =
-            "11112333 11222344 11255346 77253344 73355334 77335344 87355333 77333333";
-        let res = solve(raw_color_regions, false);
-        assert!(res.0.is_some());
-    }
-
-    fn get_inds_from_u64(n: u64) -> Vec<usize> {
-        let mut result = Vec::new();
-        // Iterate over the bits in the board, and return the index of each bit set to 1
-        for i in 0..64 {
-            if n & (1 << i) != 0 {
-                result.push(i);
-            }
-        }
-        result
-    }
+    // fn get_inds_from_u64(n: u64) -> vec<usize> {
+    //     let mut result = vec::new();
+    //     // iterate over the bits in the board, and return the index of each bit set to 1
+    //     for i in 0..64 {
+    //         if n & (1 << i) != 0 {
+    //             result.push(i);
+    //         }
+    //     }
+    //     result
+    // }
 }

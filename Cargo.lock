@@ -75,9 +75,9 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
 name = "bit-board"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8e0c370e534c1fc26e35c1b40bf5530621ec3c606287d3d5d9c9b9c9414c53c"
+checksum = "2e4aaeae731794566cdc79f0ed5b3bb6c5a3017036dcff15279bc671c0d9d603"
 dependencies = [
  "bitvec",
 ]
