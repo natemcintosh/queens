@@ -1,42 +1,14 @@
-/// Represents an 8x8 board, where each bit in the `u64` represents one spot. Indexing
-/// goes from left to right, top to bottom. If a bit is 0, that means it is "open" for
-/// placement. If it is 1, that means it is "occupied" by a queen OR is blocked by a
-/// queen.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Board(u64);
-
-use std::fmt;
+use bit_board::bitboard::BitBoard;
+use bit_board::bitboardstatic::BitBoardStatic;
 
 use itertools::Itertools;
-
-impl fmt::Display for Board {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for row in 0..8 {
-            for col in 0..8 {
-                let idx = row * 8 + col;
-                let mask = 1 << idx;
-                if self.0 & mask == 0 {
-                    write!(f, ". ")?;
-                } else {
-                    write!(f, "X ")?;
-                }
-            }
-            writeln!(f)?;
-        }
-        Ok(())
-    }
-}
-
-impl Default for Board {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+use std::collections::{HashMap, HashSet};
+use std::fmt;
 
 #[derive(Debug, PartialEq)]
 pub enum BoardPlacementResult {
     /// The queen was successfully placed on the board.
-    Success(Board),
+    Success(QueenBoard),
     /// The queen was not placed because the spot was already claimed by a queen.
     SpotOccupied,
     /// The queen was not placed because it was not in the color region.
@@ -44,657 +16,114 @@ pub enum BoardPlacementResult {
     /// The queen was not placed because the index at which it was attempted to be
     /// placed was out of bounds.
     IndexOutOfBounds,
+    /// The bitboard says there was a dimension mismatch
+    DimensionMismatch,
 }
 
-impl Board {
-    /// Creates a new empty board.
-    pub fn new() -> Self {
-        Board(0)
+/// A `BitBoard` for playing Queens. Assumes boards are not larger than 192
+/// positions (64 * 3).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct QueenBoard(BitBoardStatic<3>);
+
+impl fmt::Display for QueenBoard {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // column indices
+        write!(f, "   ")?; // space for row labels
+        for col in 0..self.0.n_cols() {
+            write!(f, "{}", col % 15)?; // wrap every 15 for readability
+        }
+        writeln!(f)?;
+
+        for row in 0..self.0.n_rows() {
+            // row index, right-aligned to 2 spaces
+            write!(f, "{row:>2} ")?;
+            for col in 0..self.0.n_cols() {
+                let bit = self.0.get(row, col);
+                let c = if bit { 'X' } else { '.' };
+                write!(f, "{c}")?;
+            }
+            writeln!(f)?;
+        }
+        Ok(())
+    }
+}
+
+impl QueenBoard {
+    /// Create a new board
+    #[must_use]
+    pub fn new(n_rows: usize, n_cols: usize) -> Self {
+        QueenBoard(BitBoardStatic::new(n_rows, n_cols))
     }
 
     /// Clears the board by setting all bits to 0.
     pub fn clear(&mut self) {
-        self.0 = 0;
+        self.0.fill(false);
     }
 
-    /// If a queen can be placed at index `queen_idx` on the board, place it and return
-    /// the updated board as `Some(Board)`. If not, return `None`. If the queen can be
-    /// placed, the board is updated by setting the bit at `queen_idx` to 1, as well as
-    /// all of the bits representing the row, column, and color region that the queen is
-    /// in.
-    pub fn place_queen(&self, queen_idx: u64, color_region_mask: u64) -> BoardPlacementResult {
-        // Make sure the index is within bounds
-        if queen_idx >= 64 {
-            return BoardPlacementResult::IndexOutOfBounds;
+    /// Place the `value` at the linear index `index`.
+    pub fn set_linear_index(&mut self, index: usize, value: bool) {
+        self.0.board_mut().set(index, value);
+    }
+
+    /// Get the linear indices
+    pub fn get_linear_indices(&self) -> impl Iterator<Item = usize> {
+        self.0.board().iter_ones()
+    }
+
+    /// Check that none of the spots in the one away diagonals are set
+    #[must_use]
+    pub fn one_off_diagonals_are_empty(&self, linear_idx: usize) -> bool {
+        // First get the row and column of this `linear_idx`
+        let (row, col) = self.0.row_col_of(linear_idx);
+
+        // Then get the spots above left, above right, below left, below right
+        // assuming there is such a spot on the board
+
+        // Above left
+        if (row > 0) && (col > 0) && self.0.get(row - 1, col - 1) {
+            return false;
         }
 
-        // Create a mask with a single bit set at the queen_idx index
-        let queen_only_mask = 1 << queen_idx;
-
-        // Make sure the queen is in the color region
-        if color_region_mask != 0 && color_region_mask & queen_only_mask == 0 {
-            // Get color_region_mask and queen_only_mask as bit strings for better
-            // debugging
-            // println!("{color_region_mask:#064b}");
-            // println!("{queen_only_mask:#064b}");
-            return BoardPlacementResult::NotInColorRegion;
+        // Above right
+        if (row > 0) && (col < self.0.n_cols() - 1) && self.0.get(row - 1, col + 1) {
+            return false;
         }
 
-        if self.0 & queen_only_mask == 0 {
-            // If the spot is empty, block off all of the spots in the same row, same
-            // column, and same color region.
-            BoardPlacementResult::Success(Board(
-                self.0 | self.fill_queen_reach(queen_idx, color_region_mask),
-            ))
-        } else {
-            BoardPlacementResult::SpotOccupied
-        }
-    }
-
-    /// For a given queen spot, fill in all of the spots that the queen can reach:
-    /// her row, column, and diagonals.
-    fn fill_queen_reach(&self, queen_idx: u64, color_region_mask: u64) -> u64 {
-        let row_mask = self.fill_row(queen_idx);
-        let col_mask = self.fill_column(queen_idx);
-        let diagonal_mask = self.fill_diagonals(queen_idx);
-        row_mask | col_mask | diagonal_mask | color_region_mask
-    }
-
-    /// Fills in the spots to the 4 diagonal squares of the index. If along the edges,
-    /// and no such diagonal exists on the board, skip that diagonal.
-    fn fill_diagonals(&self, queen_idx: u64) -> u64 {
-        let row = queen_idx / 8;
-        let col = queen_idx % 8;
-
-        let mut mask = 0;
-
-        // Fill in the top-left diagonal
-        if row > 0 && col > 0 {
-            // The index is up one row (-8) and left one (-1)
-            mask |= 1 << (queen_idx - 8 - 1);
+        // Below left
+        if (row < self.0.n_rows() - 1) && (col > 0) && self.0.get(row + 1, col - 1) {
+            return false;
         }
 
-        // Fill in the top-right diagonal
-        if row > 0 && col < 7 {
-            // The index is up one row (-8) and right one (+1)
-            mask |= 1 << (queen_idx - 8 + 1);
+        // Below right
+        if (row < self.0.n_rows() - 1)
+            && (col < self.0.n_cols() - 1)
+            && self.0.get(row + 1, col + 1)
+        {
+            return false;
         }
 
-        // Fill in the bottom-left diagonal
-        if row < 7 && col > 0 {
-            // The index is down one row (+8) and left one (-1)
-            mask |= 1 << (queen_idx + 8 - 1);
-        }
-
-        // Fill in the bottom-right diagonal
-        if row < 7 && col < 7 {
-            // The index is down one row (+8) and right one (+1)
-            mask |= 1 << (queen_idx + 8 + 1);
-        }
-
-        mask
+        true
     }
 
-    /// Fill in all of the bits that represent the row of the given spot index, where
-    /// the idx represents the index (as a value) at which the queen is located.
-    fn fill_row(&self, idx: u64) -> u64 {
-        // Calculate which row this spot is in (0-7)
-        let row = idx / 8;
-        // Create a mask with all 8 bits set for this row
-        0xFF_u64 << (row * 8)
+    /// Check that this row is empty
+    #[must_use]
+    pub fn row_is_empty(&self, row: usize) -> bool {
+        // Use the bitboard's method to inspect each item in the row.
+        // Come here and use the underlying bitvec get() method over
+        // a range of indices if more performance is required.
+        self.0.get_row(row).all(|item| !item)
     }
 
-    /// Fill in all of the bits that represent the column of the given spot index, where
-    /// the idx represents the index (as a value) at which the queen is located.
-    fn fill_column(&self, idx: u64) -> u64 {
-        // Calculate which column this spot is in (0-7)
-        let col = idx % 8;
-        // Create a mask with the bit pattern for this column repeated across all rows
-        // Each row needs the same column bit set, so we use the pattern (1 << col) repeated 8 times
-        (1u64 << col) * 0x0101010101010101u64
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use rstest::rstest;
-
-    #[rstest]
-    #[case(0, build_bit_set_from_inds(&[9]))]
-    #[case(1, build_bit_set_from_inds(&[8, 10]))]
-    #[case(2, build_bit_set_from_inds(&[9, 11]))]
-    #[case(7, build_bit_set_from_inds(&[14]))]
-    #[case(8, build_bit_set_from_inds(&[1, 17]))]
-    #[case(9, build_bit_set_from_inds(&[0, 2, 16, 18]))]
-    #[case(56, build_bit_set_from_inds(&[49]))]
-    #[case(57, build_bit_set_from_inds(&[48, 50]))]
-    #[case(62, build_bit_set_from_inds(&[53, 55]))]
-    #[case(63, build_bit_set_from_inds(&[54]))]
-    #[case(28, build_bit_set_from_inds(&[19, 21, 35, 37]))]
-    fn test_fill_diagonals(#[case] queen_idx: u64, #[case] want_diags: u64) {
-        let board = Board::new();
-        let got = board.fill_diagonals(queen_idx);
-        assert_eq!(got, want_diags);
-    }
-
-    #[rstest]
-    #[case(0, 0b11111111)]
-    #[case(1, 0b11111111)]
-    #[case(2, 0b11111111)]
-    #[case(3, 0b11111111)]
-    #[case(4, 0b11111111)]
-    #[case(5, 0b11111111)]
-    #[case(6, 0b11111111)]
-    #[case(7, 0b11111111)]
-    #[case(8, 0b11111111_00000000)]
-    #[case(9, 0b11111111_00000000)]
-    #[case(10, 0b11111111_00000000)]
-    #[case(11, 0b11111111_00000000)]
-    #[case(12, 0b11111111_00000000)]
-    #[case(13, 0b11111111_00000000)]
-    #[case(14, 0b11111111_00000000)]
-    #[case(15, 0b11111111_00000000)]
-    #[case(16, 0b11111111_00000000_00000000)]
-    #[case(17, 0b11111111_00000000_00000000)]
-    #[case(18, 0b11111111_00000000_00000000)]
-    #[case(19, 0b11111111_00000000_00000000)]
-    #[case(20, 0b11111111_00000000_00000000)]
-    #[case(21, 0b11111111_00000000_00000000)]
-    #[case(22, 0b11111111_00000000_00000000)]
-    #[case(23, 0b11111111_00000000_00000000)]
-    #[case(24, 0b11111111_00000000_00000000_00000000)]
-    #[case(25, 0b11111111_00000000_00000000_00000000)]
-    #[case(26, 0b11111111_00000000_00000000_00000000)]
-    #[case(27, 0b11111111_00000000_00000000_00000000)]
-    #[case(28, 0b11111111_00000000_00000000_00000000)]
-    #[case(29, 0b11111111_00000000_00000000_00000000)]
-    #[case(30, 0b11111111_00000000_00000000_00000000)]
-    #[case(31, 0b11111111_00000000_00000000_00000000)]
-    #[case(32, 0b11111111_00000000_00000000_00000000_00000000)]
-    #[case(33, 0b11111111_00000000_00000000_00000000_00000000)]
-    #[case(34, 0b11111111_00000000_00000000_00000000_00000000)]
-    #[case(35, 0b11111111_00000000_00000000_00000000_00000000)]
-    #[case(36, 0b11111111_00000000_00000000_00000000_00000000)]
-    #[case(37, 0b11111111_00000000_00000000_00000000_00000000)]
-    #[case(38, 0b11111111_00000000_00000000_00000000_00000000)]
-    #[case(39, 0b11111111_00000000_00000000_00000000_00000000)]
-    #[case(40, 0b11111111_00000000_00000000_00000000_00000000_00000000)]
-    #[case(41, 0b11111111_00000000_00000000_00000000_00000000_00000000)]
-    #[case(42, 0b11111111_00000000_00000000_00000000_00000000_00000000)]
-    #[case(43, 0b11111111_00000000_00000000_00000000_00000000_00000000)]
-    #[case(44, 0b11111111_00000000_00000000_00000000_00000000_00000000)]
-    #[case(45, 0b11111111_00000000_00000000_00000000_00000000_00000000)]
-    #[case(46, 0b11111111_00000000_00000000_00000000_00000000_00000000)]
-    #[case(47, 0b11111111_00000000_00000000_00000000_00000000_00000000)]
-    #[case(48, 0b11111111_00000000_00000000_00000000_00000000_00000000_00000000)]
-    #[case(49, 0b11111111_00000000_00000000_00000000_00000000_00000000_00000000)]
-    #[case(50, 0b11111111_00000000_00000000_00000000_00000000_00000000_00000000)]
-    #[case(51, 0b11111111_00000000_00000000_00000000_00000000_00000000_00000000)]
-    #[case(52, 0b11111111_00000000_00000000_00000000_00000000_00000000_00000000)]
-    #[case(53, 0b11111111_00000000_00000000_00000000_00000000_00000000_00000000)]
-    #[case(54, 0b11111111_00000000_00000000_00000000_00000000_00000000_00000000)]
-    #[case(55, 0b11111111_00000000_00000000_00000000_00000000_00000000_00000000)]
-    #[case(
-        56,
-        0b11111111_00000000_00000000_00000000_00000000_00000000_00000000_00000000
-    )]
-    #[case(
-        57,
-        0b11111111_00000000_00000000_00000000_00000000_00000000_00000000_00000000
-    )]
-    #[case(
-        58,
-        0b11111111_00000000_00000000_00000000_00000000_00000000_00000000_00000000
-    )]
-    #[case(
-        59,
-        0b11111111_00000000_00000000_00000000_00000000_00000000_00000000_00000000
-    )]
-    #[case(
-        60,
-        0b11111111_00000000_00000000_00000000_00000000_00000000_00000000_00000000
-    )]
-    #[case(
-        61,
-        0b11111111_00000000_00000000_00000000_00000000_00000000_00000000_00000000
-    )]
-    #[case(
-        62,
-        0b11111111_00000000_00000000_00000000_00000000_00000000_00000000_00000000
-    )]
-    #[case(
-        63,
-        0b11111111_00000000_00000000_00000000_00000000_00000000_00000000_00000000
-    )]
-    fn test_fill_row(#[case] spot_idx: u64, #[case] want: u64) {
-        let board = Board(0);
-        let filled_row = board.fill_row(spot_idx);
-        assert_eq!(filled_row, want);
-    }
-
-    #[rstest]
-    #[case(
-        0,
-        0b00000001_00000001_00000001_00000001_00000001_00000001_00000001_00000001
-    )]
-    #[case(
-        1,
-        0b00000010_00000010_00000010_00000010_00000010_00000010_00000010_00000010
-    )]
-    #[case(
-        2,
-        0b00000100_00000100_00000100_00000100_00000100_00000100_00000100_00000100
-    )]
-    #[case(
-        3,
-        0b00001000_00001000_00001000_00001000_00001000_00001000_00001000_00001000
-    )]
-    #[case(
-        4,
-        0b00010000_00010000_00010000_00010000_00010000_00010000_00010000_00010000
-    )]
-    #[case(
-        5,
-        0b00100000_00100000_00100000_00100000_00100000_00100000_00100000_00100000
-    )]
-    #[case(
-        6,
-        0b01000000_01000000_01000000_01000000_01000000_01000000_01000000_01000000
-    )]
-    #[case(
-        7,
-        0b10000000_10000000_10000000_10000000_10000000_10000000_10000000_10000000
-    )]
-    #[case(
-        8,
-        0b00000001_00000001_00000001_00000001_00000001_00000001_00000001_00000001
-    )]
-    #[case(
-        9,
-        0b00000010_00000010_00000010_00000010_00000010_00000010_00000010_00000010
-    )]
-    #[case(
-        10,
-        0b00000100_00000100_00000100_00000100_00000100_00000100_00000100_00000100
-    )]
-    #[case(
-        11,
-        0b00001000_00001000_00001000_00001000_00001000_00001000_00001000_00001000
-    )]
-    #[case(
-        12,
-        0b00010000_00010000_00010000_00010000_00010000_00010000_00010000_00010000
-    )]
-    #[case(
-        13,
-        0b00100000_00100000_00100000_00100000_00100000_00100000_00100000_00100000
-    )]
-    #[case(
-        14,
-        0b01000000_01000000_01000000_01000000_01000000_01000000_01000000_01000000
-    )]
-    #[case(
-        15,
-        0b10000000_10000000_10000000_10000000_10000000_10000000_10000000_10000000
-    )]
-    #[case(
-        16,
-        0b00000001_00000001_00000001_00000001_00000001_00000001_00000001_00000001
-    )]
-    #[case(
-        17,
-        0b00000010_00000010_00000010_00000010_00000010_00000010_00000010_00000010
-    )]
-    #[case(
-        18,
-        0b00000100_00000100_00000100_00000100_00000100_00000100_00000100_00000100
-    )]
-    #[case(
-        19,
-        0b00001000_00001000_00001000_00001000_00001000_00001000_00001000_00001000
-    )]
-    #[case(
-        20,
-        0b00010000_00010000_00010000_00010000_00010000_00010000_00010000_00010000
-    )]
-    #[case(
-        21,
-        0b00100000_00100000_00100000_00100000_00100000_00100000_00100000_00100000
-    )]
-    #[case(
-        22,
-        0b01000000_01000000_01000000_01000000_01000000_01000000_01000000_01000000
-    )]
-    #[case(
-        23,
-        0b10000000_10000000_10000000_10000000_10000000_10000000_10000000_10000000
-    )]
-    #[case(
-        24,
-        0b00000001_00000001_00000001_00000001_00000001_00000001_00000001_00000001
-    )]
-    #[case(
-        25,
-        0b00000010_00000010_00000010_00000010_00000010_00000010_00000010_00000010
-    )]
-    #[case(
-        26,
-        0b00000100_00000100_00000100_00000100_00000100_00000100_00000100_00000100
-    )]
-    #[case(
-        27,
-        0b00001000_00001000_00001000_00001000_00001000_00001000_00001000_00001000
-    )]
-    #[case(
-        28,
-        0b00010000_00010000_00010000_00010000_00010000_00010000_00010000_00010000
-    )]
-    #[case(
-        29,
-        0b00100000_00100000_00100000_00100000_00100000_00100000_00100000_00100000
-    )]
-    #[case(
-        30,
-        0b01000000_01000000_01000000_01000000_01000000_01000000_01000000_01000000
-    )]
-    #[case(
-        31,
-        0b10000000_10000000_10000000_10000000_10000000_10000000_10000000_10000000
-    )]
-    #[case(
-        32,
-        0b00000001_00000001_00000001_00000001_00000001_00000001_00000001_00000001
-    )]
-    #[case(
-        33,
-        0b00000010_00000010_00000010_00000010_00000010_00000010_00000010_00000010
-    )]
-    #[case(
-        34,
-        0b00000100_00000100_00000100_00000100_00000100_00000100_00000100_00000100
-    )]
-    #[case(
-        35,
-        0b00001000_00001000_00001000_00001000_00001000_00001000_00001000_00001000
-    )]
-    #[case(
-        36,
-        0b00010000_00010000_00010000_00010000_00010000_00010000_00010000_00010000
-    )]
-    #[case(
-        37,
-        0b00100000_00100000_00100000_00100000_00100000_00100000_00100000_00100000
-    )]
-    #[case(
-        38,
-        0b01000000_01000000_01000000_01000000_01000000_01000000_01000000_01000000
-    )]
-    #[case(
-        39,
-        0b10000000_10000000_10000000_10000000_10000000_10000000_10000000_10000000
-    )]
-    #[case(
-        40,
-        0b00000001_00000001_00000001_00000001_00000001_00000001_00000001_00000001
-    )]
-    #[case(
-        41,
-        0b00000010_00000010_00000010_00000010_00000010_00000010_00000010_00000010
-    )]
-    #[case(
-        42,
-        0b00000100_00000100_00000100_00000100_00000100_00000100_00000100_00000100
-    )]
-    #[case(
-        43,
-        0b00001000_00001000_00001000_00001000_00001000_00001000_00001000_00001000
-    )]
-    #[case(
-        44,
-        0b00010000_00010000_00010000_00010000_00010000_00010000_00010000_00010000
-    )]
-    #[case(
-        45,
-        0b00100000_00100000_00100000_00100000_00100000_00100000_00100000_00100000
-    )]
-    #[case(
-        46,
-        0b01000000_01000000_01000000_01000000_01000000_01000000_01000000_01000000
-    )]
-    #[case(
-        47,
-        0b10000000_10000000_10000000_10000000_10000000_10000000_10000000_10000000
-    )]
-    #[case(
-        48,
-        0b00000001_00000001_00000001_00000001_00000001_00000001_00000001_00000001
-    )]
-    #[case(
-        49,
-        0b00000010_00000010_00000010_00000010_00000010_00000010_00000010_00000010
-    )]
-    #[case(
-        50,
-        0b00000100_00000100_00000100_00000100_00000100_00000100_00000100_00000100
-    )]
-    #[case(
-        51,
-        0b00001000_00001000_00001000_00001000_00001000_00001000_00001000_00001000
-    )]
-    #[case(
-        52,
-        0b00010000_00010000_00010000_00010000_00010000_00010000_00010000_00010000
-    )]
-    #[case(
-        53,
-        0b00100000_00100000_00100000_00100000_00100000_00100000_00100000_00100000
-    )]
-    #[case(
-        54,
-        0b01000000_01000000_01000000_01000000_01000000_01000000_01000000_01000000
-    )]
-    #[case(
-        55,
-        0b10000000_10000000_10000000_10000000_10000000_10000000_10000000_10000000
-    )]
-    #[case(
-        56,
-        0b00000001_00000001_00000001_00000001_00000001_00000001_00000001_00000001
-    )]
-    #[case(
-        57,
-        0b00000010_00000010_00000010_00000010_00000010_00000010_00000010_00000010
-    )]
-    #[case(
-        58,
-        0b00000100_00000100_00000100_00000100_00000100_00000100_00000100_00000100
-    )]
-    #[case(
-        59,
-        0b00001000_00001000_00001000_00001000_00001000_00001000_00001000_00001000
-    )]
-    #[case(
-        60,
-        0b00010000_00010000_00010000_00010000_00010000_00010000_00010000_00010000
-    )]
-    #[case(
-        61,
-        0b00100000_00100000_00100000_00100000_00100000_00100000_00100000_00100000
-    )]
-    #[case(
-        62,
-        0b01000000_01000000_01000000_01000000_01000000_01000000_01000000_01000000
-    )]
-    #[case(
-        63,
-        0b10000000_10000000_10000000_10000000_10000000_10000000_10000000_10000000
-    )]
-    fn test_fill_column(#[case] spot_idx: u64, #[case] want: u64) {
-        let board = Board(0);
-        let filled_column = board.fill_column(spot_idx);
-        assert_eq!(filled_column, want);
-    }
-
-    #[rstest]
-    // Test with no color region (0), because that part is fairly obviously correct
-    #[case(
-        0,
-        0,
-        0b00000001_00000001_00000001_00000001_00000001_00000001_00000011_11111111
-    )]
-    #[case(
-        9,
-        0,
-        0b00000010_00000010_00000010_00000010_00000010_00000111_11111111_00000111
-    )]
-    #[case(
-        18,
-        0,
-        0b00000100_00000100_00000100_00000100_00001110_11111111_00001110_00000100
-    )]
-    #[case(
-        27,
-        0,
-        0b00001000_00001000_00001000_00011100_11111111_00011100_00001000_00001000
-    )]
-    #[case(
-        36,
-        0,
-        0b00010000_00010000_00111000_11111111_00111000_00010000_00010000_00010000
-    )]
-    #[case(
-        45,
-        0,
-        0b00100000_01110000_11111111_01110000_00100000_00100000_00100000_00100000
-    )]
-    #[case(
-        54,
-        0,
-        0b11100000_11111111_11100000_01000000_01000000_01000000_01000000_01000000
-    )]
-    #[case(
-        63,
-        0,
-        0b11111111_11000000_10000000_10000000_10000000_10000000_10000000_10000000
-    )]
-    fn test_fill_queen_reach(#[case] queen_idx: u64, #[case] color_region: u64, #[case] want: u64) {
-        let board = Board(0);
-        let queen_reach = board.fill_queen_reach(queen_idx, color_region);
-        assert_eq!(queen_reach, want);
-    }
-
-    #[test]
-    fn test_place_queen_invalid() {
-        let board = Board::new();
-
-        // Test index out of bounds
-        assert_eq!(
-            board.place_queen(64, 0),
-            BoardPlacementResult::IndexOutOfBounds
-        );
-
-        // Test spot occupied
-        let board = if let BoardPlacementResult::Success(b) = board.place_queen(0, 0) {
-            b
-        } else {
-            panic!("Placing queen failed unexpectedly");
-        };
-        assert_eq!(board.place_queen(0, 0), BoardPlacementResult::SpotOccupied);
-
-        // Test not in color region
-        assert_eq!(
-            board.place_queen(1, 1 << 2),
-            BoardPlacementResult::NotInColorRegion
-        );
-    }
-
-    #[rstest]
-    #[case(vec![], 0, 0, 0b00000001_00000001_00000001_00000001_00000001_00000001_00000011_11111111, "place queen on empty board at (0,0)")]
-    #[case(vec![], 18, 0, 0b00000100_00000100_00000100_00000100_00001110_11111111_00001110_00000100, "place queen on empty board at (2,2)")]
-    #[case(vec![(0, 0)], 10, 0, 0b00000101_00000101_00000101_00000101_00000101_00001111_11111111_11111111, "place queen on board with one queen")]
-    #[case(vec![(0, 0), (63, 0)], 18, 0, 0b11111111_11000101_10000101_10000101_10001111_11111111_10001111_11111111, "place queen on board with two queens")]
-    #[case(vec![], 2, 1 << 2, 0b00000100_00000100_00000100_00000100_00000100_00000100_00001110_11111111, "place queen with simple color region")]
-    #[case(vec![], 10, (1 << 10) | (1 << 18), 0b00000100_00000100_00000100_00000100_00000100_00001110_11111111_00001110, "place queen with complex color region")]
-    fn test_place_queen_valid(
-        #[case] initial_placements: Vec<(u64, u64)>,
-        #[case] new_queen_idx: u64,
-        #[case] new_color_region: u64,
-        #[case] expected_board_val: u64,
-        #[case] _description: &str,
-    ) {
-        let mut board = Board::new();
-        for (idx, color) in initial_placements {
-            board = if let BoardPlacementResult::Success(b) = board.place_queen(idx, color) {
-                b
-            } else {
-                panic!("Failed to setup board for test");
-            };
-        }
-
-        let result = board.place_queen(new_queen_idx, new_color_region);
-        assert_eq!(
-            result,
-            BoardPlacementResult::Success(Board(expected_board_val))
-        );
-    }
-    #[test]
-    fn test_good_region_input() {
-        let string = "11233456 12234456 11233456 12273456 11233456 88885556 66888886 66666666";
-        let regions = parse_color_region_masks(string);
-        assert_eq!(
-            regions,
-            [
-                build_bit_set_from_inds(&[0, 1, 8, 16, 17, 24, 32, 33]),
-                build_bit_set_from_inds(&[2, 9, 10, 18, 25, 26, 34]),
-                build_bit_set_from_inds(&[3, 4, 11, 19, 20, 28, 35, 36]),
-                build_bit_set_from_inds(&[5, 12, 13, 21, 29, 37]),
-                build_bit_set_from_inds(&[6, 14, 22, 30, 38, 44, 45, 46]),
-                build_bit_set_from_inds(&[
-                    7, 15, 23, 31, 39, 47, 55, 48, 49, 56, 57, 58, 59, 60, 61, 62, 63
-                ]),
-                build_bit_set_from_inds(&[27]),
-                build_bit_set_from_inds(&[40, 41, 42, 43, 50, 51, 52, 53, 54]),
-            ]
-        );
-    }
-
-    #[test]
-    fn test_regions_are_columns() {
-        // In this test, the color regions are the rows, and we test that it can
-        // successfully return any solution
-        let raw_color_regions =
-            "12345678 12345678 12345678 12345678 12345678 12345678 12345678 12345678";
-        // Make sure it returns sucess
-        let res = solve(raw_color_regions, false);
-        assert!(res.0.is_some());
-    }
-
-    #[test]
-    fn test_regions_are_rows() {
-        // In this test, the color regions are the rows, and we test that it can
-        // successfully return any solution
-        let raw_color_regions =
-            "11111111 22222222 33333333 44444444 55555555 66666666 77777777 88888888";
-        let res = solve(raw_color_regions, false);
-        assert!(res.0.is_some());
-    }
-
-    #[test]
-    fn test_actual_board() {
-        // In this test, we use an actual board
-        let raw_color_regions =
-            "11112333 11222344 11255346 77253344 73355334 77335344 87355333 77333333";
-        let res = solve(raw_color_regions, false);
-        assert!(res.0.is_some());
+    /// Check that this column is empty
+    #[must_use]
+    pub fn col_is_empty(&self, col: usize) -> bool {
+        self.0.get_col(col).all(|item| !item)
     }
 }
 
 /// Take a set of indices, and insert each into a bitset.
-pub fn build_bit_set_from_inds(inds: &[u64]) -> u64 {
-    // Make sure all indices are valid
-    assert!(inds.iter().all(|&idx| idx < 64));
-
+#[must_use]
+pub fn build_bit_set_from_inds(inds: &[usize]) -> u64 {
     let mut bitset = 0;
     for &idx in inds {
         bitset |= 1 << idx;
@@ -702,110 +131,152 @@ pub fn build_bit_set_from_inds(inds: &[u64]) -> u64 {
     bitset
 }
 
-/// The user passes in the color regions by assigning numbers to each region.
-/// Then they enter each row, left to right, top to bottom, with a space between the
-/// rows. This function will verify that there are exactly 8 unique numbers used
-/// An example input string might look like
-/// "11233456 12234456 11233456 12273456 11233456 88885556 66888886 66666666"
-pub fn parse_color_region_masks(input: &str) -> [u64; 8] {
-    let mut regions = [0; 8];
-
-    for (row_idx, row) in input.split_whitespace().enumerate() {
-        for (col_idx, color) in row.chars().enumerate() {
-            let color = color.to_digit(10).expect("Could not parse into int");
-            if color > 8 {
-                panic!("Color region number must be between 1 and 8");
-            }
-            let linear_idx = (8 * row_idx) + col_idx;
-            regions[color as usize - 1] |= 1 << linear_idx;
-        }
+/// Take a set of indices, and insert each into a bitset.
+#[must_use]
+pub fn build_queen_board_from_inds(inds: &[usize], n_rows: usize, n_cols: usize) -> QueenBoard {
+    let mut board = QueenBoard::new(n_rows, n_cols);
+    for &spot_ind in inds {
+        board.set_linear_index(spot_ind, true);
     }
-
-    regions
+    board
 }
 
-/// The user passes in the color regions by assigning numbers to each region.
-/// Then they enter each row, left to right, top to bottom, with a space between the
-/// rows. This function will verify that there are exactly 8 unique numbers used
-/// An example input string might look like
-/// "11233456 12234456 11233456 12273456 11233456 88885556 66888886 66666666"
-pub fn parse_color_region_inds(input: &str) -> Vec<Vec<u64>> {
-    // Create 8 empty vectors to store the indices of each color region
-    let mut regions: Vec<Vec<u64>> = vec![Vec::new(); 8];
+/// The user passes in the color regions, as a `HashMap<char, Vec<u64>>`. For each pair
+/// in the hash map, a `QueenBoard` is created.
+#[must_use]
+pub fn parse_color_region_boards(
+    input: &HashMap<char, Vec<usize>>,
+    n_rows: usize,
+    n_cols: usize,
+) -> Vec<QueenBoard> {
+    // Create the vector to hold the boards
+    let mut boards: Vec<QueenBoard> = Vec::with_capacity(input.len());
 
-    for (row_idx, row) in input.split_whitespace().enumerate() {
-        for (col_idx, color) in row.chars().enumerate() {
-            let color = color.to_digit(10).expect("Could not parse into int");
-            if color > 8 {
-                panic!("Color region number must be between 1 and 8");
-            }
-            let linear_idx = (8 * row_idx) + col_idx;
-            regions[color as usize - 1].push(linear_idx as u64);
+    // Create the empty boards inside the vector
+    for _ in 0..input.len() {
+        boards.push(QueenBoard::new(n_rows, n_cols));
+    }
+
+    // Iterate over each of the color regions
+    for (cr_idx, inds) in input.values().enumerate() {
+        // For this color region, set the inds to true
+        for &spot_ind in inds {
+            boards[cr_idx].set_linear_index(spot_ind, true);
         }
     }
 
-    regions
+    boards
+}
+
+/// The user passes in the color regions by assigning letters to each region.
+/// Then they enter each row, left to right, top to bottom, with a space between the
+/// rows. This function returns the color regions as numbers for simplicity.
+///
+/// # Panics
+///
+/// Panics if no whitespace found in the input
+#[must_use]
+pub fn parse_color_region_inds(input: &str) -> (HashMap<char, Vec<usize>>, usize, usize) {
+    // How many rows does this input array have?
+    let n_rows = input.split_whitespace().count();
+    // println!("Found {n_rows} rows in the input");
+
+    // How many columns does this input array have?
+    let n_cols = input.split_whitespace().next().unwrap().len();
+    // println!("Found {n_cols} columns in the input");
+
+    // How many unique characters are there? Remove the whitespace, and then count how
+    // many unique characters are left
+    let n_unique_chars = input
+        .replace(' ', "")
+        .chars()
+        .collect::<HashSet<char>>()
+        .len();
+    println!("Found {n_unique_chars} unique characters in the input");
+
+    // Create a hashmap to store the indices of each color region
+    let mut regions: HashMap<char, Vec<usize>> = HashMap::new();
+
+    for (row_idx, row) in input.split_whitespace().enumerate() {
+        for (col_idx, id) in row.chars().enumerate() {
+            let region = regions.entry(id).or_default();
+            let linear_idx = (row_idx * n_cols) + col_idx;
+            region.push(linear_idx);
+        }
+    }
+
+    (regions, n_rows, n_cols)
 }
 
 /// Solve the puzzle by brute force, attempting all possible combinations until one
 /// works. Return a vector of each queen's index (not a mask), or None if it failed to
 /// find a solution.
-pub fn solve(raw_color_regions: &str, verbose: bool) -> (Option<Vec<u64>>, usize) {
+pub fn solve(raw_color_regions: &str, verbose: bool) -> (Option<QueenBoard>, usize) {
     // First parse the regions into a nested vec of the indices that make up this color
     // region
-    let color_region_inds = parse_color_region_inds(raw_color_regions);
+    let (color_regions, n_rows, n_cols) = parse_color_region_inds(raw_color_regions);
 
-    // Also get the bitsets that make up the color regions
-    let color_region_bitsets = parse_color_region_masks(raw_color_regions);
+    // Get just the indices
+    let color_region_inds: Vec<Vec<usize>> = color_regions.values().cloned().collect();
 
     // Let the user know how many possible positions are being checked.
     if verbose {
-        let possible_combos: usize = color_region_inds
-            .iter()
-            .map(|region| region.len())
-            .product();
+        let possible_combos: usize = color_region_inds.iter().map(Vec::len).product();
         // Format it with commas every 3 digits
         let formatted_combo = format_thousands(possible_combos);
         println!("Will search up to {formatted_combo} positions");
     }
 
     // A mutable board to reduce allocations
-    let mut b = Board::new();
+    let mut b = QueenBoard::new(n_rows, n_cols);
     let mut gidx: usize = 0;
 
-    'outer: for (idx, queen_placement) in color_region_inds
-        .iter()
-        .multi_cartesian_product()
-        .enumerate()
-    {
+    'outer: for queen_placement in color_region_inds.iter().multi_cartesian_product() {
         // Update the global index
         gidx += 1;
 
         // Make sure the board is empty
         b.clear();
 
-        // Try this placement by placing one queen at a time
-        for (idx, &&queen_idx) in queen_placement.iter().enumerate() {
-            match b.place_queen(queen_idx, color_region_bitsets[idx]) {
-                BoardPlacementResult::Success(board) => {
-                    // We were able to place this queen.
-                    // Update the board with the new queen's position
-                    b = board;
-                }
-                BoardPlacementResult::SpotOccupied => {
-                    // Overlap, cannot do this spot, try next placement
-                    continue 'outer;
-                }
-                BoardPlacementResult::NotInColorRegion => {
-                    unreachable!("The queen is not in the color region it shoudl be in")
-                }
-                BoardPlacementResult::IndexOutOfBounds => {
-                    unreachable!("The queen is not in the color region it shoudl be in")
-                }
-            }
+        // Add the queens of this `queen_placement` to the board
+        for queen_idx in &queen_placement {
+            b.set_linear_index(**queen_idx, true);
         }
 
-        return (Some(queen_placement.iter().map(|&&q| q).collect()), idx);
+        // For each queen, check that no other queen is in its
+        // row, column, or one-away diagonals.
+        for queen_idx in &queen_placement {
+            // Remove this queen from the board for now so we don't accidentally
+            // count it
+            b.set_linear_index(**queen_idx, false);
+
+            // If there is a queen in one of the diagonal spots, continue
+            // to the next set of placements
+            if !b.one_off_diagonals_are_empty(**queen_idx) {
+                continue 'outer;
+            }
+
+            // Get the row and column for this spot
+            let (row, col) = b.0.row_col_of(**queen_idx);
+
+            // If there is a queen in this row, continue to the next set of
+            // placements
+            if !b.row_is_empty(row) {
+                continue 'outer;
+            }
+
+            // If there is a queen in this column, continue to the next
+            // set of placements
+            if !b.col_is_empty(col) {
+                continue 'outer;
+            }
+
+            // If we made it this far, then "replace" this queen
+            b.set_linear_index(**queen_idx, true);
+        }
+
+        // If we made it this far, then this is a valid set of placements
+        return (Some(b), gidx);
     }
 
     // If we get here, we did not find a solution
@@ -830,6 +301,10 @@ pub fn disp_u64(board: u64) {
 }
 
 /// Format a number with commas every 3 digits
+///
+/// # Panics
+///
+/// Panics if digits cannot be parsed into UTF8
 pub fn format_thousands(n: usize) -> String {
     // Format it with commas every 3 digits
     n.to_string()
@@ -840,4 +315,140 @@ pub fn format_thousands(n: usize) -> String {
         .collect::<Result<Vec<&str>, _>>()
         .unwrap()
         .join(",")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use rstest::rstest;
+
+    // #[test]
+    // fn test_good_region_input() {
+    //     let string = "11233456 12234456 11233456 12273456 11233456 88885556 66888886 66666666";
+    //     let (map, n_rows, n_cols) = parse_color_region_inds(string);
+    //     let regions = parse_color_region_boards(&map, n_rows, n_cols);
+    //     assert_eq!(
+    //         regions,
+    //         [
+    //             build_queen_board_from_inds(&[0, 1, 8, 16, 17, 24, 32, 33], n_rows, n_cols),
+    //             build_queen_board_from_inds(&[2, 9, 10, 18, 25, 26, 34], n_rows, n_cols),
+    //             build_queen_board_from_inds(&[3, 4, 11, 19, 20, 28, 35, 36], n_rows, n_cols),
+    //             build_queen_board_from_inds(&[5, 12, 13, 21, 29, 37], n_rows, n_cols),
+    //             build_queen_board_from_inds(&[6, 14, 22, 30, 38, 44, 45, 46], n_rows, n_cols),
+    //             build_queen_board_from_inds(
+    //                 &[
+    //                     7, 15, 23, 31, 39, 47, 55, 48, 49, 56, 57, 58, 59, 60, 61, 62, 63
+    //                 ],
+    //                 n_rows,
+    //                 n_cols
+    //             ),
+    //             build_queen_board_from_inds(&[27], n_rows, n_cols),
+    //             build_queen_board_from_inds(&[40, 41, 42, 43, 50, 51, 52, 53, 54], n_rows, n_cols),
+    //         ]
+    //     );
+    // }
+
+    #[test]
+    fn test_regions_are_columns() {
+        // In this test, the color regions are the columns, and we test that it can
+        // successfully return any solution
+        let raw_color_regions = "12345 12345 12345 12345 12345 ";
+        // Make sure it returns sucess
+        let res = solve(raw_color_regions, false);
+        assert!(res.0.is_some());
+    }
+
+    #[test]
+    fn test_regions_are_rows() {
+        // In this test, the color regions are the rows, and we test that it can
+        // successfully return any solution
+        let raw_color_regions = "11111 22222 33333 44444 55555";
+        let res = solve(raw_color_regions, false);
+        assert!(res.0.is_some());
+    }
+
+    #[test]
+    fn test_actual_board() {
+        // In this test, we use an actual board
+        let raw_color_regions =
+            "11112333 11222344 11255346 77253344 73355334 77335344 87355333 77333333";
+        let res = solve(raw_color_regions, false);
+        assert!(res.0.is_some());
+    }
+
+    #[rstest]
+    #[case(0, &[], true, "empty board")]
+    #[case(4, &[0], false, "above left occupied")]
+    #[case(4, &[2], false, "above right occupied")]
+    #[case(4, &[6], false, "below left occupied")]
+    #[case(4, &[8], false, "below right occupied")]
+    #[case(4, &[1, 3, 5, 7], true, "no diagonals")]
+    #[case(9, &[0, 1], true, "place to check is off the board")]
+    fn test_one_off_diagonals_are_empty(
+        #[case] idx: u64,
+        #[case] initial_placements: &[usize],
+        #[case] expected: bool,
+        #[case] description: &str,
+    ) {
+        let board = build_queen_board_from_inds(initial_placements, 3, 3);
+        assert_eq!(
+            board.one_off_diagonals_are_empty(idx as usize),
+            expected,
+            "{}",
+            description
+        );
+    }
+
+    #[rstest]
+    #[case(0, &[], true, "empty board")]
+    #[case(1, &[], true, "empty board")]
+    #[case(0, &[2, 3], true, "empty row")]
+    #[case(1, &[0, 1], true, "empty row")]
+    #[case(0, &[0], false, "row is not empty")]
+    #[case(0, &[0, 1], false, "row is not empty")]
+    #[case(0, &[1], false, "row is not empty")]
+    #[case(1, &[2], false, "row is not empty")]
+    #[case(1, &[2, 3], false, "row is not empty")]
+    #[case(1, &[3], false, "row is not empty")]
+    fn test_row_is_empty(
+        #[case] row: usize,
+        #[case] initial_placements: &[usize],
+        #[case] expected: bool,
+        #[case] description: &str,
+    ) {
+        let board = build_queen_board_from_inds(initial_placements, 2, 2);
+        assert_eq!(expected, board.row_is_empty(row), "{}", description);
+    }
+
+    #[rstest]
+    #[case(0, &[], true, "empty board")]
+    #[case(1, &[], true, "empty board")]
+    #[case(0, &[1, 3], true, "empty col")]
+    #[case(1, &[0, 2], true, "empty col")]
+    #[case(0, &[0], false, "col is not empty")]
+    #[case(0, &[0, 2], false, "col is not empty")]
+    #[case(0, &[2], false, "col is not empty")]
+    #[case(1, &[1], false, "col is not empty")]
+    #[case(1, &[1, 3], false, "col is not empty")]
+    #[case(1, &[3], false, "col is not empty")]
+    fn test_col_is_empty(
+        #[case] col: usize,
+        #[case] initial_placements: &[usize],
+        #[case] expected: bool,
+        #[case] description: &str,
+    ) {
+        let board = build_queen_board_from_inds(initial_placements, 2, 2);
+        assert_eq!(expected, board.col_is_empty(col), "{}", description);
+    }
+    // fn get_inds_from_u64(n: u64) -> vec<usize> {
+    //     let mut result = vec::new();
+    //     // iterate over the bits in the board, and return the index of each bit set to 1
+    //     for i in 0..64 {
+    //         if n & (1 << i) != 0 {
+    //             result.push(i);
+    //         }
+    //     }
+    //     result
+    // }
 }

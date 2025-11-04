@@ -1,14 +1,14 @@
 use clap::Parser;
-use queens::{build_bit_set_from_inds, disp_u64, format_thousands, solve};
+use queens::{format_thousands, solve};
 
 #[derive(Parser)]
 #[command(about = "Solve the queens problem")]
 struct Args {
     /// Input string for the queens problem. Should be all in one string, representing
-    /// the colors. You assign unique numbers to each color region (use the numbers 1 -
-    /// 8 or it will error out). Separate each row with a space. An example input is
-    /// "11233456 12234456 11233456 12273456 11233456 88885556 66888886 66666666"
-    /// where number corresponds to a certain color, e.g. 1 => red, 2 => blue, etc.
+    /// the colors. You assign unique letters to each color region. Separate each row
+    /// with a space. An example input is
+    /// "aabccefg abbceefg aabccefg abbgcdef aabccedf hhhheeef ffhhhhhf ffffffff"
+    /// where letter corresponds to a certain color, e.g. r => red, b => blue, etc.
     color_regions: String,
 
     /// Whether to print out the solution in a human-readable format
@@ -27,11 +27,16 @@ fn main() {
     let (res, n_iters) = solve(&args.color_regions, args.verbose);
     let run_time = start.elapsed();
     let formatted_iters = format_thousands(n_iters);
+    let iter_per_second = (n_iters as f64) / run_time.as_secs_f64();
 
     // Print out the time it took
     println!("Positions searched: {formatted_iters}");
-    println!("Time: {:?}\n\n", run_time);
+    println!("Time: {run_time:?}");
+    println!("Iterations per second: {iter_per_second}\n\n");
 
     // Print out the result, whatever it is
-    disp_u64(build_bit_set_from_inds(&res.expect("No solution found")));
+    match res {
+        Some(board) => println!("{board}"),
+        None => println!("No solution found"),
+    }
 }
