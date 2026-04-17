@@ -260,16 +260,85 @@ pub fn is_valid_solution(board: &QueenBoard, color_regions: &[Vec<usize>]) -> bo
     true
 }
 
-/// Public entry point for solving a Queens puzzle. Currently dispatches to the
-/// brute-force solver; will be switched to `solve_backtracking` once that lands.
+/// Public entry point for solving a Queens puzzle. Dispatches to the backtracking
+/// solver.
 pub fn solve(raw_color_regions: &str, verbose: bool) -> (Option<QueenBoard>, usize) {
-    solve_brute_force(raw_color_regions, verbose)
+    solve_backtracking(raw_color_regions, verbose)
 }
 
-/// Backtracking solver. Not yet implemented — returns `(None, 0)` as a placeholder
-/// so test scaffolding can be written against the intended API.
-pub fn solve_backtracking(_raw_color_regions: &str, _verbose: bool) -> (Option<QueenBoard>, usize) {
-    (None, 0)
+/// Solve the puzzle by backtracking region-by-region. Regions are processed smallest
+/// first (MRV) so forced placements prune subtrees early. Row/column conflicts use
+/// `u64` bitmasks; diagonal conflicts reuse `QueenBoard::one_off_diagonals_are_empty`.
+/// The second tuple element is the number of cells tried (loop iterations), analogous
+/// to the brute-force counter.
+pub fn solve_backtracking(raw_color_regions: &str, verbose: bool) -> (Option<QueenBoard>, usize) {
+    let (regions_map, n_rows, n_cols) = parse_color_region_inds(raw_color_regions);
+    let mut regions: Vec<Vec<usize>> = regions_map.values().cloned().collect();
+    regions.sort_by_key(Vec::len);
+
+    if verbose {
+        let possible_combos: usize = regions.iter().map(Vec::len).product();
+        let formatted_combo = format_thousands(possible_combos);
+        println!("Will search up to {formatted_combo} positions");
+    }
+
+    let mut board = QueenBoard::new(n_rows, n_cols);
+    let mut counter: usize = 0;
+    let mut used_rows: u64 = 0;
+    let mut used_cols: u64 = 0;
+
+    let found = backtrack(
+        &regions,
+        0,
+        n_cols,
+        &mut board,
+        &mut counter,
+        &mut used_rows,
+        &mut used_cols,
+    );
+
+    if found {
+        (Some(board), counter)
+    } else {
+        (None, counter)
+    }
+}
+
+fn backtrack(
+    regions: &[Vec<usize>],
+    depth: usize,
+    n_cols: usize,
+    board: &mut QueenBoard,
+    counter: &mut usize,
+    used_rows: &mut u64,
+    used_cols: &mut u64,
+) -> bool {
+    if depth == regions.len() {
+        return true;
+    }
+    for &idx in &regions[depth] {
+        *counter += 1;
+        let row = idx / n_cols;
+        let col = idx % n_cols;
+        let row_bit = 1u64 << row;
+        let col_bit = 1u64 << col;
+        if *used_rows & row_bit != 0 || *used_cols & col_bit != 0 {
+            continue;
+        }
+        if !board.one_off_diagonals_are_empty(idx) {
+            continue;
+        }
+        board.set_linear_index(idx, true);
+        *used_rows |= row_bit;
+        *used_cols |= col_bit;
+        if backtrack(regions, depth + 1, n_cols, board, counter, used_rows, used_cols) {
+            return true;
+        }
+        board.set_linear_index(idx, false);
+        *used_rows &= !row_bit;
+        *used_cols &= !col_bit;
+    }
+    false
 }
 
 /// Solve the puzzle by brute force, attempting all possible combinations until one
@@ -506,13 +575,18 @@ mod tests {
     }
 
     /// Equivalence: brute-force and backtracking must agree on solvability, and both
-    /// returned boards (when present) must pass the validator. The `#[ignore]` will be
-    /// lifted once `solve_backtracking` is implemented.
+    /// returned boards (when present) must pass the validator. Different solvers can
+    /// legitimately return different-but-valid boards, so we don't assert equality.
     #[rstest]
+    #[case("1")]
+    #[case("11 22")]
+    #[case("111 222 333")]
+    #[case("1234 1234 1234 1234")]
     #[case("12345 12345 12345 12345 12345")]
     #[case("11111 22222 33333 44444 55555")]
+    #[case("12c ccc ccc")]
     #[case("11112333 11222344 11255346 77253344 73355334 77335344 87355333 77333333")]
-    #[ignore = "enable after solve_backtracking is implemented"]
+    #[case("aabccefg abbceefg aabccefg abbgcdef aabccedf hhhheeef ffhhhhhf ffffffff")]
     fn test_solvers_agree(#[case] raw: &str) {
         let regions = regions_as_vec(raw);
         let (bf, _) = solve_brute_force(raw, false);
@@ -529,6 +603,66 @@ mod tests {
                 is_valid_solution(&b, &regions),
                 "backtracking returned invalid"
             );
+        }
+    }
+
+    fn lcg_next(state: &mut u64) -> u64 {
+        *state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        *state
+    }
+
+    /// Build a random `n`×`n` region input with exactly `n` distinct labels, so
+    /// `parse_color_region_inds` accepts it. Each label is anchored to one row to
+    /// guarantee it appears at least once.
+    fn random_region_input(n: usize, seed: u64) -> String {
+        let mut state = seed.wrapping_add(1);
+        let mut grid: Vec<Vec<u8>> = (0..n)
+            .map(|_| {
+                (0..n)
+                    .map(|_| (lcg_next(&mut state) % n as u64) as u8)
+                    .collect()
+            })
+            .collect();
+        for row in 0..n {
+            let col = (lcg_next(&mut state) % n as u64) as usize;
+            grid[row][col] = row as u8;
+        }
+        grid.iter()
+            .map(|row| row.iter().map(|&l| (b'a' + l) as char).collect::<String>())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// Property-style equivalence: over many randomly generated puzzles, both solvers
+    /// must agree on solvability and any returned board must pass the validator.
+    #[test]
+    fn test_solvers_agree_random() {
+        for n in 2..=6 {
+            for seed in 0..50u64 {
+                let raw = random_region_input(n, seed);
+                let regions = regions_as_vec(&raw);
+                let (bf, _) = solve_brute_force(&raw, false);
+                let (bt, _) = solve_backtracking(&raw, false);
+                assert_eq!(
+                    bf.is_some(),
+                    bt.is_some(),
+                    "solvability disagreement (n={n}, seed={seed}, input={raw:?})"
+                );
+                if let Some(b) = bf {
+                    assert!(
+                        is_valid_solution(&b, &regions),
+                        "brute-force returned invalid (n={n}, seed={seed}, input={raw:?})"
+                    );
+                }
+                if let Some(b) = bt {
+                    assert!(
+                        is_valid_solution(&b, &regions),
+                        "backtracking returned invalid (n={n}, seed={seed}, input={raw:?})"
+                    );
+                }
+            }
         }
     }
 
