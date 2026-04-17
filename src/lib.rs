@@ -185,14 +185,17 @@ pub fn parse_color_region_inds(input: &str) -> (HashMap<char, Vec<usize>>, usize
     let n_cols = input.split_whitespace().next().unwrap().len();
     // println!("Found {n_cols} columns in the input");
 
-    // How many unique characters are there? Remove the whitespace, and then count how
-    // many unique characters are left
+    // A valid Queens board has exactly one queen per row, column, and color
+    // region, so the number of distinct region characters must equal n_cols.
     let n_unique_chars = input
         .replace(' ', "")
         .chars()
         .collect::<HashSet<char>>()
         .len();
-    println!("Found {n_unique_chars} unique characters in the input");
+    assert_eq!(
+        n_unique_chars, n_cols,
+        "expected {n_cols} color regions (one per column), found {n_unique_chars}"
+    );
 
     // Verify all rows have the same number of columns
     for (row_idx, row) in input.split_whitespace().enumerate() {
@@ -612,10 +615,17 @@ mod tests {
 
     #[test]
     fn test_parse_uniform_row_lengths() {
-        let (regions, n_rows, n_cols) = parse_color_region_inds("123 456 789");
+        let (regions, n_rows, n_cols) = parse_color_region_inds("123 123 123");
         assert_eq!(n_rows, 3);
         assert_eq!(n_cols, 3);
-        assert_eq!(regions.len(), 9);
+        assert_eq!(regions.len(), 3);
+    }
+
+    #[test]
+    #[should_panic(expected = "expected 3 color regions")]
+    fn test_parse_rejects_wrong_region_count() {
+        // 3x3 grid but 9 unique chars — violates the Queens invariant.
+        let _ = parse_color_region_inds("123 456 789");
     }
 
     /// A known-valid 5x5 solution: queens at (0,0), (1,2), (2,4), (3,1), (4,3).

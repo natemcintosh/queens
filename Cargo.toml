@@ -17,5 +17,5 @@ criterion = "0.5.1"
 rstest = "0.25.0"
 
 [[bench]]
-name = "my_benchmark"
+name = "solvers"
 harness = false
