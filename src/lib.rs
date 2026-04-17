@@ -218,10 +218,61 @@ pub fn parse_color_region_inds(input: &str) -> (HashMap<char, Vec<usize>>, usize
     (regions, n_rows, n_cols)
 }
 
+/// Validate that `board` is a correct Queens solution for `color_regions`.
+///
+/// Checks: total queen count equals the number of regions; exactly one queen per row,
+/// per column, and per region; and no two queens are one-off diagonally adjacent.
+#[must_use]
+pub fn is_valid_solution(board: &QueenBoard, color_regions: &[Vec<usize>]) -> bool {
+    let queen_inds: Vec<usize> = board.get_linear_indices().collect();
+    let n = color_regions.len();
+
+    if queen_inds.len() != n {
+        return false;
+    }
+
+    let mut rows = HashSet::with_capacity(n);
+    let mut cols = HashSet::with_capacity(n);
+    for &idx in &queen_inds {
+        let (row, col) = board.0.row_col_of(idx);
+        if !rows.insert(row) || !cols.insert(col) {
+            return false;
+        }
+    }
+
+    for &idx in &queen_inds {
+        if !board.one_off_diagonals_are_empty(idx) {
+            return false;
+        }
+    }
+
+    let queen_set: HashSet<usize> = queen_inds.into_iter().collect();
+    for region in color_regions {
+        let count = region.iter().filter(|i| queen_set.contains(i)).count();
+        if count != 1 {
+            return false;
+        }
+    }
+
+    true
+}
+
+/// Public entry point for solving a Queens puzzle. Currently dispatches to the
+/// brute-force solver; will be switched to `solve_backtracking` once that lands.
+pub fn solve(raw_color_regions: &str, verbose: bool) -> (Option<QueenBoard>, usize) {
+    solve_brute_force(raw_color_regions, verbose)
+}
+
+/// Backtracking solver. Not yet implemented — returns `(None, 0)` as a placeholder
+/// so test scaffolding can be written against the intended API.
+pub fn solve_backtracking(_raw_color_regions: &str, _verbose: bool) -> (Option<QueenBoard>, usize) {
+    (None, 0)
+}
+
 /// Solve the puzzle by brute force, attempting all possible combinations until one
 /// works. Return a vector of each queen's index (not a mask), or None if it failed to
 /// find a solution.
-pub fn solve(raw_color_regions: &str, verbose: bool) -> (Option<QueenBoard>, usize) {
+pub fn solve_brute_force(raw_color_regions: &str, verbose: bool) -> (Option<QueenBoard>, usize) {
     // First parse the regions into a nested vec of the indices that make up this color
     // region
     let (color_regions, n_rows, n_cols) = parse_color_region_inds(raw_color_regions);
@@ -359,32 +410,123 @@ mod tests {
     //     );
     // }
 
+    /// Parse raw color regions into the `Vec<Vec<usize>>` form the validator expects.
+    fn regions_as_vec(raw: &str) -> Vec<Vec<usize>> {
+        let (regions, _, _) = parse_color_region_inds(raw);
+        regions.values().cloned().collect()
+    }
+
     #[test]
     fn test_regions_are_columns() {
-        // In this test, the color regions are the columns, and we test that it can
-        // successfully return any solution
-        let raw_color_regions = "12345 12345 12345 12345 12345 ";
-        // Make sure it returns sucess
-        let res = solve(raw_color_regions, false);
-        assert!(res.0.is_some());
+        let raw = "12345 12345 12345 12345 12345";
+        let regions = regions_as_vec(raw);
+        let (board_opt, _) = solve(raw, false);
+        let board = board_opt.expect("expected a solution");
+        assert!(is_valid_solution(&board, &regions));
     }
 
     #[test]
     fn test_regions_are_rows() {
-        // In this test, the color regions are the rows, and we test that it can
-        // successfully return any solution
-        let raw_color_regions = "11111 22222 33333 44444 55555";
-        let res = solve(raw_color_regions, false);
-        assert!(res.0.is_some());
+        let raw = "11111 22222 33333 44444 55555";
+        let regions = regions_as_vec(raw);
+        let (board_opt, _) = solve(raw, false);
+        let board = board_opt.expect("expected a solution");
+        assert!(is_valid_solution(&board, &regions));
     }
 
     #[test]
     fn test_actual_board() {
-        // In this test, we use an actual board
-        let raw_color_regions =
-            "11112333 11222344 11255346 77253344 73355334 77335344 87355333 77333333";
-        let res = solve(raw_color_regions, false);
-        assert!(res.0.is_some());
+        let raw = "11112333 11222344 11255346 77253344 73355334 77335344 87355333 77333333";
+        let regions = regions_as_vec(raw);
+        let (board_opt, _) = solve(raw, false);
+        let board = board_opt.expect("expected a solution");
+        assert!(is_valid_solution(&board, &regions));
+    }
+
+    /// Correctness table: for each input, `solve` must agree with `expected_solvable`,
+    /// and any returned board must pass the validator. Targets `solve`, which is
+    /// currently the brute-force solver and will later dispatch to the backtracker —
+    /// the same table exercises both phases.
+    #[rstest]
+    #[case("1", true, "1x1 trivial")]
+    #[case("11 22", false, "2x2 rows unsolvable")]
+    #[case("111 222 333", false, "3x3 rows unsolvable")]
+    #[case("1111 2222 3333 4444", true, "4x4 rows solvable")]
+    #[case("12345 12345 12345 12345 12345", true, "5x5 cols")]
+    #[case("11111 22222 33333 44444 55555", true, "5x5 rows")]
+    #[case(
+        "11112333 11222344 11255346 77253344 73355334 77335344 87355333 77333333",
+        true,
+        "8x8 real puzzle"
+    )]
+    #[case("12c ccc ccc", false, "forced A(0,0)+B(0,1) same-row conflict")]
+    fn test_solve_correctness_table(
+        #[case] raw: &str,
+        #[case] expected_solvable: bool,
+        #[case] description: &str,
+    ) {
+        let regions = regions_as_vec(raw);
+        let (board_opt, _) = solve(raw, false);
+        assert_eq!(
+            board_opt.is_some(),
+            expected_solvable,
+            "solvability mismatch: {description}"
+        );
+        if let Some(board) = board_opt {
+            assert!(
+                is_valid_solution(&board, &regions),
+                "returned board is invalid: {description}"
+            );
+        }
+    }
+
+    /// Real-world regression puzzles. Each case is a Queens puzzle known to be
+    /// solvable; the test asserts `solve` produces a board that validates. Add new
+    /// puzzles here as they're encountered in the wild.
+    #[rstest]
+    #[case(
+        "11112333 11222344 11255346 77253344 73355334 77335344 87355333 77333333",
+        "original 8x8 from test_actual_board"
+    )]
+    #[case(
+        "aabccefg abbceefg aabccefg abbgcdef aabccedf hhhheeef ffhhhhhf ffffffff",
+        "8x8 from main.rs docstring example"
+    )]
+    fn test_real_world_puzzles(#[case] raw: &str, #[case] description: &str) {
+        let regions = regions_as_vec(raw);
+        let (board_opt, _) = solve(raw, false);
+        let board = board_opt.unwrap_or_else(|| panic!("expected solution for: {description}"));
+        assert!(
+            is_valid_solution(&board, &regions),
+            "returned board is invalid: {description}"
+        );
+    }
+
+    /// Equivalence: brute-force and backtracking must agree on solvability, and both
+    /// returned boards (when present) must pass the validator. The `#[ignore]` will be
+    /// lifted once `solve_backtracking` is implemented.
+    #[rstest]
+    #[case("12345 12345 12345 12345 12345")]
+    #[case("11111 22222 33333 44444 55555")]
+    #[case("11112333 11222344 11255346 77253344 73355334 77335344 87355333 77333333")]
+    #[ignore = "enable after solve_backtracking is implemented"]
+    fn test_solvers_agree(#[case] raw: &str) {
+        let regions = regions_as_vec(raw);
+        let (bf, _) = solve_brute_force(raw, false);
+        let (bt, _) = solve_backtracking(raw, false);
+        assert_eq!(bf.is_some(), bt.is_some(), "solvability disagreement");
+        if let Some(b) = bf {
+            assert!(
+                is_valid_solution(&b, &regions),
+                "brute-force returned invalid"
+            );
+        }
+        if let Some(b) = bt {
+            assert!(
+                is_valid_solution(&b, &regions),
+                "backtracking returned invalid"
+            );
+        }
     }
 
     #[rstest]
@@ -474,5 +616,86 @@ mod tests {
         assert_eq!(n_rows, 3);
         assert_eq!(n_cols, 3);
         assert_eq!(regions.len(), 9);
+    }
+
+    /// A known-valid 5x5 solution: queens at (0,0), (1,2), (2,4), (3,1), (4,3).
+    /// Regions are the rows.
+    fn known_valid_5x5() -> (QueenBoard, Vec<Vec<usize>>) {
+        let queens = [0, 7, 14, 16, 23];
+        let board = build_queen_board_from_inds(&queens, 5, 5);
+        let regions = vec![
+            vec![0, 1, 2, 3, 4],
+            vec![5, 6, 7, 8, 9],
+            vec![10, 11, 12, 13, 14],
+            vec![15, 16, 17, 18, 19],
+            vec![20, 21, 22, 23, 24],
+        ];
+        (board, regions)
+    }
+
+    #[test]
+    fn test_validator_accepts_valid_5x5() {
+        let (board, regions) = known_valid_5x5();
+        assert!(is_valid_solution(&board, &regions));
+    }
+
+    #[test]
+    fn test_validator_accepts_trivial_1x1() {
+        let board = build_queen_board_from_inds(&[0], 1, 1);
+        let regions = vec![vec![0]];
+        assert!(is_valid_solution(&board, &regions));
+    }
+
+    #[test]
+    fn test_validator_rejects_too_few_queens() {
+        let board = build_queen_board_from_inds(&[0, 7], 5, 5);
+        let (_, regions) = known_valid_5x5();
+        assert!(!is_valid_solution(&board, &regions));
+    }
+
+    #[test]
+    fn test_validator_rejects_too_many_queens() {
+        let board = build_queen_board_from_inds(&[0, 7, 14, 16, 23, 11], 5, 5);
+        let (_, regions) = known_valid_5x5();
+        assert!(!is_valid_solution(&board, &regions));
+    }
+
+    #[test]
+    fn test_validator_rejects_duplicate_row() {
+        // Queens at (0,0) and (0,1) — same row.
+        let board = build_queen_board_from_inds(&[0, 1], 4, 4);
+        let regions = vec![vec![0], vec![1]];
+        assert!(!is_valid_solution(&board, &regions));
+    }
+
+    #[test]
+    fn test_validator_rejects_duplicate_column() {
+        // Queens at (0,0) and (1,0) — same column.
+        let board = build_queen_board_from_inds(&[0, 4], 4, 4);
+        let regions = vec![vec![0], vec![4]];
+        assert!(!is_valid_solution(&board, &regions));
+    }
+
+    #[test]
+    fn test_validator_rejects_one_off_diagonal() {
+        // Queens at (0,0) and (1,1) — one-off diagonal.
+        let board = build_queen_board_from_inds(&[0, 5], 4, 4);
+        let regions = vec![vec![0], vec![5]];
+        assert!(!is_valid_solution(&board, &regions));
+    }
+
+    #[test]
+    fn test_validator_rejects_two_queens_in_one_region() {
+        // Valid board placement from known_valid_5x5, but regions are rigged so that
+        // region A holds two queens and region E holds zero.
+        let (board, _) = known_valid_5x5();
+        let regions = vec![
+            vec![0, 16],   // two queens here (indices 0 and 16)
+            vec![7],       // one queen
+            vec![14],      // one queen
+            vec![23],      // one queen
+            vec![1, 2, 3], // zero queens
+        ];
+        assert!(!is_valid_solution(&board, &regions));
     }
 }
