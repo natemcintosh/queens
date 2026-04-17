@@ -194,6 +194,16 @@ pub fn parse_color_region_inds(input: &str) -> (HashMap<char, Vec<usize>>, usize
         .len();
     println!("Found {n_unique_chars} unique characters in the input");
 
+    // Verify all rows have the same number of columns
+    for (row_idx, row) in input.split_whitespace().enumerate() {
+        if row.len() != n_cols {
+            panic!(
+                "Row {row_idx} has {} columns, but expected {n_cols} (based on the first row)",
+                row.len()
+            );
+        }
+    }
+
     // Create a hashmap to store the indices of each color region
     let mut regions: HashMap<char, Vec<usize>> = HashMap::new();
 
@@ -451,4 +461,18 @@ mod tests {
     //     }
     //     result
     // }
+
+    #[test]
+    #[should_panic(expected = "Row 1 has 2 columns, but expected 3")]
+    fn test_parse_mismatched_row_lengths() {
+        let _ = parse_color_region_inds("111 22 333");
+    }
+
+    #[test]
+    fn test_parse_uniform_row_lengths() {
+        let (regions, n_rows, n_cols) = parse_color_region_inds("123 456 789");
+        assert_eq!(n_rows, 3);
+        assert_eq!(n_cols, 3);
+        assert_eq!(regions.len(), 9);
+    }
 }
